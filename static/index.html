@@ -343,6 +343,26 @@ main{padding:16px 20px;min-height:50vh}
   0%,100%{opacity:1}50%{opacity:.5}
 }
 
+/* ── CHART ───────────────────────────────────────────── */
+.chart-wrap{
+  height:220px;
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  position:relative;
+  background:var(--bg);
+  overflow:hidden;
+}
+.chart-loading{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--muted);font-size:11px;gap:8px;
+}
+.chart-loading .spin{
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--border2);border-top-color:var(--accent);
+  animation:spin .7s linear infinite;
+}
+
 /* ── RESPONSIVE ──────────────────────────────────────── */
 @media(max-width:640px){
   .stat{padding:8px 12px}
@@ -353,6 +373,7 @@ main{padding:16px 20px;min-height:50vh}
   .stats-bar{padding:0 12px}
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -472,13 +493,17 @@ let allSignals = [], cfg = {};
 let activeDir = 'all', activeConf = 'all';
 let nextScanEpoch = 0;
 
+// Base path: /bot2/ → /bot2, / → ''
+const BASE = location.pathname.replace(/\/$/, '');
+
+// Chart instances & candle cache
+const charts      = new Map(); // symbol → { chart, series }
+const candleCache = new Map(); // symbol → candle[]
+
 // ── WEBSOCKET ──────────────────────────────────────────────────
 function connect() {
-  // 0.0.0.0 tidak valid sebagai WS target — fallback ke localhost
   const host = ['0.0.0.0', ''].includes(location.hostname) ? 'localhost:' + location.port : location.host;
-  // Detect base path: /bot2/ → /bot2, / → '' (support nginx sub-path proxy)
-  const base = location.pathname.replace(/\/$/, '');
-  ws = new WebSocket(`ws://${host}${base}/ws`);
+  ws = new WebSocket(`ws://${host}${BASE}/ws`);
   ws.onopen = () => {
     setWsStatus('connected', 'Live');
     document.getElementById('btnScan').disabled = false;
@@ -524,6 +549,18 @@ function handleMsg(m) {
     case 'log':
       addLog(m);
       break;
+    case 'candle_update':
+      if (charts.has(m.symbol)) {
+        charts.get(m.symbol).series.update(m.candle);
+        // keep cache in sync with latest candle
+        const cached = candleCache.get(m.symbol);
+        if (cached && cached.length) {
+          const last = cached[cached.length - 1];
+          if (last.time === m.candle.time) cached[cached.length - 1] = m.candle;
+          else cached.push(m.candle);
+        }
+      }
+      break;
     case 'heartbeat':
       if (m.uptime) setUptime(m.uptime);
       break;
@@ -540,6 +577,8 @@ function scanNow() {
 
 // ── RENDER ─────────────────────────────────────────────────────
 function renderSignals(signals, scanCount) {
+  charts.forEach(({chart}) => { try { chart.remove(); } catch(_){} });
+  charts.clear();
   allSignals = signals;
   updateStats(signals, scanCount);
   applyFilters();
@@ -561,6 +600,7 @@ function applyFilters() {
     return;
   }
   grid.innerHTML = filtered.map((s, i) => cardHTML(s, i * 40)).join('');
+  initCharts(filtered);
 }
 
 function cardHTML(s, delay) {
@@ -621,6 +661,10 @@ function cardHTML(s, delay) {
       <span class="price-num">${fmtPrice(s.tp2)}</span>
       ${pct(tp2_pct, true)}
     </div>
+  </div>
+
+  <div class="chart-wrap" id="chart-${uid}">
+    <div class="chart-loading"><span class="spin"></span> Loading chart…</div>
   </div>
 
   <div class="scores">
@@ -760,6 +804,97 @@ function esc(s) {
 function now() {
   return new Date().toTimeString().slice(0,8);
 }
+
+// ── CHARTS ─────────────────────────────────────────────────────
+function chartOpts(container) {
+  return {
+    width:  container.clientWidth,
+    height: 220,
+    layout: {
+      background: { type: 'solid', color: '#060c17' },
+      textColor:  '#6b829e',
+    },
+    grid: {
+      vertLines: { color: '#1b2f4a' },
+      horzLines: { color: '#1b2f4a' },
+    },
+    crosshair: {
+      vertLine: { color: '#4d8fff44' },
+      horzLine: { color: '#4d8fff44' },
+    },
+    rightPriceScale: { borderColor: '#1b2f4a' },
+    timeScale: {
+      borderColor: '#1b2f4a',
+      timeVisible: true,
+      secondsVisible: false,
+    },
+  };
+}
+
+function seriesOpts() {
+  return {
+    upColor:         '#00e87a',
+    downColor:       '#ff4560',
+    borderUpColor:   '#00e87a',
+    borderDownColor: '#ff4560',
+    wickUpColor:     '#00e87a',
+    wickDownColor:   '#ff4560',
+  };
+}
+
+function addPriceLines(series, sig) {
+  const LS = LightweightCharts.LineStyle;
+  series.createPriceLine({ price: sig.price, color: '#4d8fff', lineWidth: 1, lineStyle: LS.Solid,  axisLabelVisible: true, title: 'Entry' });
+  series.createPriceLine({ price: sig.sl,    color: '#ff4560', lineWidth: 1, lineStyle: LS.Dashed, axisLabelVisible: true, title: 'SL' });
+  series.createPriceLine({ price: sig.tp1,   color: '#00e87a', lineWidth: 1, lineStyle: LS.Dashed, axisLabelVisible: true, title: 'TP1' });
+  series.createPriceLine({ price: sig.tp2,   color: '#00aa55', lineWidth: 1, lineStyle: LS.Dotted, axisLabelVisible: true, title: 'TP2' });
+}
+
+async function fetchAndSetCandles(symbol, series, chart) {
+  try {
+    const iv   = cfg.interval_entry || '15m';
+    const resp = await fetch(`${BASE}/api/candles/${symbol}?interval=${encodeURIComponent(iv)}&limit=120`);
+    const data = await resp.json();
+    candleCache.set(symbol, data);
+    series.setData(data);
+    chart.timeScale().scrollToRealTime();
+  } catch(e) {
+    console.error('Chart load error', symbol, e);
+  }
+}
+
+async function initCharts(signals) {
+  for (const sig of signals) {
+    const uid       = sig.symbol.replace(/[^a-z0-9]/gi, '');
+    const container = document.getElementById('chart-' + uid);
+    if (!container || charts.has(sig.symbol)) continue;
+
+    const chart  = LightweightCharts.createChart(container, chartOpts(container));
+    const series = chart.addCandlestickSeries(seriesOpts());
+    addPriceLines(series, sig);
+    charts.set(sig.symbol, { chart, series });
+
+    // Remove loading spinner
+    const loader = container.querySelector('.chart-loading');
+    if (loader) loader.remove();
+
+    if (candleCache.has(sig.symbol)) {
+      series.setData(candleCache.get(sig.symbol));
+      chart.timeScale().scrollToRealTime();
+    } else {
+      fetchAndSetCandles(sig.symbol, series, chart);
+    }
+  }
+}
+
+// Resize charts on window resize
+window.addEventListener('resize', () => {
+  charts.forEach(({chart}, sym) => {
+    const uid = sym.replace(/[^a-z0-9]/gi, '');
+    const el  = document.getElementById('chart-' + uid);
+    if (el) chart.applyOptions({ width: el.clientWidth });
+  });
+});
 
 // ── BOOT ───────────────────────────────────────────────────────
 connect();

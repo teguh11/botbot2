@@ -20,7 +20,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 import config
-from crypto_signal import get_mtf_signal
+from crypto_signal import get_mtf_signal, get_klines
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -190,6 +190,35 @@ async def _auto_scanner():
         await run_scan()
 
 
+def _fetch_latest_candle(symbol: str) -> Optional[dict]:
+    try:
+        df  = get_klines(symbol, config.INTERVAL_ENTRY, 2)
+        row = df.iloc[-1]
+        return {
+            "time":  int(row["open_time"].timestamp()),
+            "open":  float(row["open"]),
+            "high":  float(row["high"]),
+            "low":   float(row["low"]),
+            "close": float(row["close"]),
+        }
+    except Exception:
+        return None
+
+
+async def _candle_updater():
+    while True:
+        await asyncio.sleep(5)
+        if not _last_signals or not manager.active:
+            continue
+        loop    = asyncio.get_running_loop()
+        symbols = [s["symbol"] for s in _last_signals[:20]]
+        tasks   = [loop.run_in_executor(executor, _fetch_latest_candle, sym) for sym in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for sym, candle in zip(symbols, results):
+            if isinstance(candle, dict):
+                await manager.broadcast({"type": "candle_update", "symbol": sym, "candle": candle})
+
+
 async def _heartbeat():
     while True:
         await asyncio.sleep(30)
@@ -200,6 +229,7 @@ async def _heartbeat():
 async def lifespan(_app: FastAPI):
     asyncio.create_task(_auto_scanner())
     asyncio.create_task(_heartbeat())
+    asyncio.create_task(_candle_updater())
     log.info("Dashboard siap di http://localhost:8000")
     yield
 
@@ -210,6 +240,22 @@ app = FastAPI(lifespan=lifespan)
 # ---------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------
+@app.get("/api/candles/{symbol}")
+async def api_candles(symbol: str, interval: str = "15m", limit: int = 120):
+    loop = asyncio.get_running_loop()
+    df   = await loop.run_in_executor(executor, lambda: get_klines(symbol.upper(), interval, limit))
+    return [
+        {
+            "time":  int(row["open_time"].timestamp()),
+            "open":  float(row["open"]),
+            "high":  float(row["high"]),
+            "low":   float(row["low"]),
+            "close": float(row["close"]),
+        }
+        for _, row in df.iterrows()
+    ]
+
+
 @app.get("/")
 async def index():
     return HTMLResponse(Path("static/index.html").read_text(encoding="utf-8"))
