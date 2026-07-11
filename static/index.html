@@ -466,7 +466,9 @@ let nextScanEpoch = 0;
 
 // ── WEBSOCKET ──────────────────────────────────────────────────
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  // 0.0.0.0 tidak valid sebagai WS target di browser — fallback ke localhost
+  const host = ['0.0.0.0', ''].includes(location.hostname) ? 'localhost:' + location.port : location.host;
+  ws = new WebSocket(`ws://${host}/ws`);
   ws.onopen = () => {
     setWsStatus('connected', 'Live');
     document.getElementById('btnScan').disabled = false;
