@@ -29,10 +29,32 @@ executor = ThreadPoolExecutor(max_workers=10)
 FUTURES_URL = "https://fapi.binance.com"
 
 # State
+_start_time:     float             = time.time()
 _last_signals:   list              = []
 _last_scan_time: Optional[datetime] = None
 _is_scanning:    bool               = False
 _log_buffer:     list              = []
+
+
+def _fmt_uptime(seconds: float) -> str:
+    s = int(seconds)
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m     = s // 60
+    if d:   return f"{d}d {h}h {m}m"
+    if h:   return f"{h}h {m}m"
+    return f"{m}m"
+
+
+def _get_uptime() -> dict:
+    bot_up = _fmt_uptime(time.time() - _start_time)
+    sys_up = "N/A"
+    try:
+        with open("/proc/uptime") as f:
+            sys_up = _fmt_uptime(float(f.read().split()[0]))
+    except Exception:
+        pass
+    return {"bot": bot_up, "sys": sys_up}
 
 
 # ---------------------------------------------------------------
@@ -168,9 +190,16 @@ async def _auto_scanner():
         await run_scan()
 
 
+async def _heartbeat():
+    while True:
+        await asyncio.sleep(30)
+        await manager.broadcast({"type": "heartbeat", "uptime": _get_uptime()})
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     asyncio.create_task(_auto_scanner())
+    asyncio.create_task(_heartbeat())
     log.info("Dashboard siap di http://localhost:8000")
     yield
 
@@ -203,6 +232,7 @@ async def ws_endpoint(ws: WebSocket):
         "signals":   _last_signals,
         "last_scan": _last_scan_time.isoformat() if _last_scan_time else None,
         "next_scan": _next_scan_epoch(),
+        "uptime":    _get_uptime(),
         "logs":      _log_buffer[-30:],
     })
     try:

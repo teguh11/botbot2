@@ -402,6 +402,14 @@ main{padding:16px 20px;min-height:50vh}
     <span class="stat-val" id="statMode">—</span>
     <span class="stat-lbl">Mode</span>
   </div>
+  <div class="stat">
+    <span class="stat-val accent" id="statBotUp">—</span>
+    <span class="stat-lbl">Bot Up</span>
+  </div>
+  <div class="stat">
+    <span class="stat-val" id="statSysUp">—</span>
+    <span class="stat-lbl">Server Up</span>
+  </div>
   <div class="time-info">
     <span>Last: <span class="time-val" id="lastScan">—</span></span>
     <span>Next: <span class="time-val" id="countdown">—</span></span>
@@ -498,6 +506,7 @@ function handleMsg(m) {
       updateStats(null, null);
       document.getElementById('statLev').textContent  = cfg.leverage + 'x';
       document.getElementById('statMode').textContent = cfg.auto_trade ? '🤖 Auto' : '👁 Watch';
+      if (m.uptime) setUptime(m.uptime);
       if (m.signals && m.signals.length) renderSignals(m.signals, m.scan_count || 0);
       if (m.last_scan) setLastScan(m.last_scan);
       if (m.next_scan) setNextScan(m.next_scan);
@@ -514,6 +523,9 @@ function handleMsg(m) {
       break;
     case 'log':
       addLog(m);
+      break;
+    case 'heartbeat':
+      if (m.uptime) setUptime(m.uptime);
       break;
     case 'error':
       addLog({ level:'ERROR', message: m.message, timestamp: now() });
@@ -694,6 +706,11 @@ function setScanning(on, count) {
 }
 
 // ── TIME ───────────────────────────────────────────────────────
+function setUptime(u) {
+  document.getElementById('statBotUp').textContent = u.bot || '—';
+  document.getElementById('statSysUp').textContent = u.sys || '—';
+}
+
 function setLastScan(iso) {
   const d = new Date(iso);
   document.getElementById('lastScan').textContent =
