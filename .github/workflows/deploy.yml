@@ -16,7 +16,7 @@ jobs:
           key:      ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-            cd /opt/botbot2
+            cd /home/ubuntu/botbot2
 
             echo "→ Pull latest code..."
             git pull origin master
