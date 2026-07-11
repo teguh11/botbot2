@@ -24,8 +24,12 @@ jobs:
             echo "→ Install/update dependencies..."
             venv/bin/pip install -r requirements.txt -q
 
-            echo "→ Restart service..."
+            echo "→ Restart app service..."
             sudo systemctl restart botbot2
+
+            echo "→ Reload nginx (jika config berubah)..."
+            sudo cp /home/ubuntu/botbot2/nginx.conf /etc/nginx/sites-available/botbot2
+            sudo nginx -t && sudo systemctl reload nginx
 
             echo "✓ Deployed at $(date '+%Y-%m-%d %H:%M:%S')"
             sudo systemctl status botbot2 --no-pager -l
