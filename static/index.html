@@ -466,9 +466,11 @@ let nextScanEpoch = 0;
 
 // ── WEBSOCKET ──────────────────────────────────────────────────
 function connect() {
-  // 0.0.0.0 tidak valid sebagai WS target di browser — fallback ke localhost
+  // 0.0.0.0 tidak valid sebagai WS target — fallback ke localhost
   const host = ['0.0.0.0', ''].includes(location.hostname) ? 'localhost:' + location.port : location.host;
-  ws = new WebSocket(`ws://${host}/ws`);
+  // Detect base path: /bot2/ → /bot2, / → '' (support nginx sub-path proxy)
+  const base = location.pathname.replace(/\/$/, '');
+  ws = new WebSocket(`ws://${host}${base}/ws`);
   ws.onopen = () => {
     setWsStatus('connected', 'Live');
     document.getElementById('btnScan').disabled = false;
