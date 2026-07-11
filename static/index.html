@@ -363,6 +363,32 @@ main{padding:16px 20px;min-height:50vh}
   animation:spin .7s linear infinite;
 }
 
+/* ── BACKTEST ────────────────────────────────────────── */
+.bt-stats{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.bt-stat{
+  flex:1;min-width:72px;padding:7px 8px;
+  border-radius:6px;background:var(--bg3);text-align:center;
+}
+.bt-stat-val{
+  font-family:var(--mono);font-size:13px;font-weight:700;line-height:1.2;
+}
+.bt-stat-val.pos{color:var(--long)}
+.bt-stat-val.neg{color:var(--short)}
+.bt-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
+.bt-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10px}
+.bt-table th{
+  color:var(--muted);text-align:left;padding:3px 4px;
+  border-bottom:1px solid var(--border);font-weight:600;font-size:9px;letter-spacing:.5px;
+}
+.bt-table td{padding:3px 4px;border-bottom:1px solid rgba(255,255,255,.03)}
+.bt-table tr.win  td{color:var(--long)}
+.bt-table tr.loss td{color:var(--short)}
+.bt-scroll{overflow-x:auto;max-height:160px;overflow-y:auto}
+.bt-loading{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  color:var(--muted);font-size:11px;padding:20px;
+}
+
 /* ── RESPONSIVE ──────────────────────────────────────── */
 @media(max-width:640px){
   .stat{padding:8px 12px}
@@ -579,6 +605,7 @@ function scanNow() {
 function renderSignals(signals, scanCount) {
   charts.forEach(({chart}) => { try { chart.remove(); } catch(_){} });
   charts.clear();
+  btCache.clear();
   allSignals = signals;
   updateStats(signals, scanCount);
   applyFilters();
@@ -688,9 +715,13 @@ function cardHTML(s, delay) {
     <div class="tab-nav">
       <button class="tab-btn active" onclick="switchTab('${uid}','15m',this)">15m Entry</button>
       <button class="tab-btn"       onclick="switchTab('${uid}','4h',this)">4H Trend</button>
+      <button class="tab-btn"       onclick="switchTab('${uid}','bt',this);loadBacktest('${uid}','${s.symbol}')">📊 Backtest</button>
     </div>
     <div class="tab-body show" id="tab-${uid}-15m">${sigs15}</div>
     <div class="tab-body"      id="tab-${uid}-4h">${sigs4h}</div>
+    <div class="tab-body"      id="tab-${uid}-bt">
+      <div class="bt-loading"><span class="spin"></span> Klik tab untuk load backtest</div>
+    </div>
   </div>
 
   <div class="card-foot">
@@ -703,8 +734,8 @@ function cardHTML(s, delay) {
 }
 
 function switchTab(uid, tf, btn) {
-  ['15m','4h'].forEach(t => {
-    const el = document.getElementById('tab-'+uid+'-'+t);
+  ['15m', '4h', 'bt'].forEach(t => {
+    const el = document.getElementById('tab-' + uid + '-' + t);
     if (el) el.classList.toggle('show', t === tf);
   });
   btn.closest('.tab-nav').querySelectorAll('.tab-btn')
@@ -848,6 +879,13 @@ function addPriceLines(series, sig) {
   series.createPriceLine({ price: sig.sl,    color: '#ff4560', lineWidth: 1, lineStyle: LS.Dashed, axisLabelVisible: true, title: 'SL' });
   series.createPriceLine({ price: sig.tp1,   color: '#00e87a', lineWidth: 1, lineStyle: LS.Dashed, axisLabelVisible: true, title: 'TP1' });
   series.createPriceLine({ price: sig.tp2,   color: '#00aa55', lineWidth: 1, lineStyle: LS.Dotted, axisLabelVisible: true, title: 'TP2' });
+  // S/R from 4H timeframe
+  (sig.support    || []).forEach((v, i) => {
+    series.createPriceLine({ price: v, color: '#00bcd4', lineWidth: 1, lineStyle: LS.Dotted, axisLabelVisible: true, title: 'S' + (i + 1) });
+  });
+  (sig.resistance || []).forEach((v, i) => {
+    series.createPriceLine({ price: v, color: '#ff9800', lineWidth: 1, lineStyle: LS.Dotted, axisLabelVisible: true, title: 'R' + (i + 1) });
+  });
 }
 
 async function fetchAndSetCandles(symbol, series, chart) {
@@ -895,6 +933,72 @@ window.addEventListener('resize', () => {
     if (el) chart.applyOptions({ width: el.clientWidth });
   });
 });
+
+// ── BACKTEST ───────────────────────────────────────────────────
+const btCache = new Map(); // symbol → result (cleared on new signals)
+
+async function loadBacktest(uid, symbol) {
+  const el = document.getElementById('tab-' + uid + '-bt');
+  if (!el) return;
+  if (btCache.has(symbol)) { renderBacktest(el, btCache.get(symbol)); return; }
+  el.innerHTML = '<div class="bt-loading"><span class="spin"></span> Running backtest…</div>';
+  try {
+    const resp = await fetch(`${BASE}/api/backtest/${symbol}`);
+    if (!resp.ok) throw new Error(resp.status);
+    const data = await resp.json();
+    btCache.set(symbol, data);
+    renderBacktest(el, data);
+  } catch(e) {
+    el.innerHTML = '<div class="bt-loading">Gagal load backtest</div>';
+  }
+}
+
+function renderBacktest(el, d) {
+  const wr     = d.win_rate  || 0;
+  const pnl    = d.total_pnl || 0;
+  const wrCls  = wr  >= 50 ? 'pos' : 'neg';
+  const pnlCls = pnl >= 0  ? 'pos' : 'neg';
+
+  const rows = (d.trades || []).slice(-20).reverse().map(t => {
+    const cls  = t.outcome === 'WIN' ? 'win' : 'loss';
+    const sign = t.pnl_pct >= 0 ? '+' : '';
+    return `<tr class="${cls}">
+      <td>${String(t.time).slice(5,16)}</td>
+      <td>${t.direction}</td>
+      <td>${t.outcome}</td>
+      <td>${sign}${t.pnl_pct}%</td>
+      <td>${t.score > 0 ? '+' : ''}${t.score}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="bt-stats">
+      <div class="bt-stat">
+        <div class="bt-stat-val ${wrCls}">${wr}%</div>
+        <div class="bt-stat-lbl">Win Rate</div>
+      </div>
+      <div class="bt-stat">
+        <div class="bt-stat-val ${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl}%</div>
+        <div class="bt-stat-lbl">Total PnL</div>
+      </div>
+      <div class="bt-stat">
+        <div class="bt-stat-val">${d.total}</div>
+        <div class="bt-stat-lbl">Trades</div>
+      </div>
+      <div class="bt-stat">
+        <div class="bt-stat-val neg">-${d.max_dd}%</div>
+        <div class="bt-stat-lbl">Max DD</div>
+      </div>
+    </div>
+    <div class="bt-scroll">
+      <table class="bt-table">
+        <thead><tr>
+          <th>Waktu</th><th>Arah</th><th>Hasil</th><th>PnL%</th><th>Skor</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" style="color:var(--muted);text-align:center">Tidak ada trade</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
 
 // ── BOOT ───────────────────────────────────────────────────────
 connect();

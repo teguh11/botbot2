@@ -20,7 +20,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 import config
-from crypto_signal import get_mtf_signal, get_klines
+from crypto_signal import get_mtf_signal, get_klines, run_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -240,6 +240,21 @@ app = FastAPI(lifespan=lifespan)
 # ---------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------
+@app.get("/api/backtest/{symbol}")
+async def api_backtest(symbol: str, days: int = 30, interval: str = "15m"):
+    loop   = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        executor,
+        lambda: run_backtest(
+            symbol.upper(), interval=interval, days=days,
+            min_score=config.MIN_SCORE,
+            sl_atr_mult=config.SL_ATR_MULT,
+            tp_rr=config.TP1_RR,
+        ),
+    )
+    return result
+
+
 @app.get("/api/candles/{symbol}")
 async def api_candles(symbol: str, interval: str = "15m", limit: int = 120):
     loop = asyncio.get_running_loop()

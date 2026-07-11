@@ -82,6 +82,37 @@ def _atr(df, period=14):
     return tr.rolling(period).mean()
 
 
+def _find_sr(df, window=5, max_levels=3, tolerance=0.005):
+    """Detect S/R from swing highs/lows on a given DataFrame."""
+    highs = df["high"].values
+    lows  = df["low"].values
+    price = float(df["close"].iloc[-1])
+    n     = len(df)
+
+    res_raw, sup_raw = [], []
+    for i in range(window, n - window):
+        if highs[i] == max(highs[max(0, i - window):i + window + 1]):
+            res_raw.append(float(highs[i]))
+        if lows[i] == min(lows[max(0, i - window):i + window + 1]):
+            sup_raw.append(float(lows[i]))
+
+    def cluster(levels):
+        if not levels:
+            return []
+        lvls = sorted(set(levels))
+        groups = [[lvls[0]]]
+        for v in lvls[1:]:
+            if (v - groups[-1][-1]) / groups[-1][-1] < tolerance:
+                groups[-1].append(v)
+            else:
+                groups.append([v])
+        return [sum(g) / len(g) for g in groups]
+
+    resistance = sorted([v for v in cluster(res_raw) if v > price])[:max_levels]
+    support    = sorted([v for v in cluster(sup_raw) if v < price], reverse=True)[:max_levels]
+    return support, resistance
+
+
 # ---------------------------------------------------------------
 # Core engine
 # ---------------------------------------------------------------
@@ -161,6 +192,7 @@ def _compute(symbol, interval, limit=300, futures=False):
         "atr":       float(last["atr"]),
         "rsi":       float(last["rsi"]),
         "ema_trend": "BULL" if last["ema50"] > last["ema200"] else "BEAR",
+        "_df":       df,
     }
 
 
@@ -183,6 +215,8 @@ def get_mtf_signal(
     """
     trend  = _compute(symbol, interval_trend, limit=250, futures=True)
     entry  = _compute(symbol, interval_entry, limit=300, futures=True)
+
+    sup4h, res4h = _find_sr(trend["_df"])
 
     s4h  = trend["score"]
     s15m = entry["score"]
@@ -230,8 +264,10 @@ def get_mtf_signal(
         "signals_15m": entry["signals"],
         "signals_4h":  trend["signals"],
         "confidence":  confidence,
-        "atr":         atr_val,
+        "atr":          atr_val,
         "ema_trend_4h": trend["ema_trend"],
+        "support":      [round(v, 8) for v in sup4h],
+        "resistance":   [round(v, 8) for v in res4h],
     }
 
 
@@ -241,6 +277,131 @@ def get_mtf_signal(
 def get_score(symbol="BTCUSDT", interval="1h"):
     r = _compute(symbol, interval)
     return r["score"], r["signals"], r["price"]
+
+
+# ---------------------------------------------------------------
+# Backtest
+# ---------------------------------------------------------------
+def run_backtest(symbol, interval="15m", days=30, min_score=3,
+                 sl_atr_mult=1.5, tp_rr=1.5):
+    """Vectorized backtest — no per-candle API calls, no funding rate."""
+    intervals_per_day = {"1m": 1440, "5m": 288, "15m": 96,
+                         "30m": 48, "1h": 24, "4h": 6, "1d": 1}
+    ipd   = intervals_per_day.get(interval, 96)
+    limit = min(days * ipd + 300, 1500)
+
+    df = get_klines(symbol, interval, limit=limit, futures=True)
+
+    close              = df["close"]
+    df["rsi"]              = _rsi(close)
+    df["macd"], df["msig"] = _macd(close)
+    df["ema50"]            = _ema(close, 50)
+    df["ema200"]           = _ema(close, 200)
+    df["bb_u"], _, df["bb_l"] = _bb(close)
+    df["vol_ma"]           = df["volume"].rolling(20).mean()
+    df["atr"]              = _atr(df)
+    df = df.dropna().reset_index(drop=True)
+
+    trades = []
+    for i in range(1, len(df) - 1):
+        row  = df.iloc[i]
+        prev = df.iloc[i - 1]
+
+        score = 0
+        rsi = float(row["rsi"])
+        if   rsi < 30: score += 2
+        elif rsi > 70: score -= 2
+
+        bull_x = float(prev["macd"]) < float(prev["msig"]) and float(row["macd"]) > float(row["msig"])
+        bear_x = float(prev["macd"]) > float(prev["msig"]) and float(row["macd"]) < float(row["msig"])
+        if   bull_x:                                          score += 2
+        elif bear_x:                                          score -= 2
+        elif float(row["macd"]) > float(row["msig"]):         score += 1
+        else:                                                 score -= 1
+
+        if float(row["ema50"]) > float(row["ema200"]): score += 1
+        else:                                          score -= 1
+
+        c_price = float(row["close"])
+        if   c_price <= float(row["bb_l"]): score += 1
+        elif c_price >= float(row["bb_u"]): score -= 1
+
+        vol, vol_ma = float(row["volume"]), float(row["vol_ma"])
+        if vol > 1.5 * vol_ma:
+            score += 1 if score > 0 else (-1 if score < 0 else 0)
+
+        if abs(score) < min_score:
+            continue
+
+        direction = "LONG" if score > 0 else "SHORT"
+        entry_px  = c_price
+        atr_val   = float(row["atr"])
+        if atr_val <= 0:
+            continue
+
+        sl_dist = sl_atr_mult * atr_val
+        if direction == "LONG":
+            sl = entry_px - sl_dist
+            tp = entry_px + sl_dist * tp_rr
+        else:
+            sl = entry_px + sl_dist
+            tp = entry_px - sl_dist * tp_rr
+
+        outcome, exit_px = None, None
+        for j in range(i + 1, min(i + 101, len(df))):
+            h = float(df.iloc[j]["high"])
+            lo = float(df.iloc[j]["low"])
+            if direction == "LONG":
+                if lo <= sl: outcome = "LOSS"; exit_px = sl; break
+                if h  >= tp: outcome = "WIN";  exit_px = tp; break
+            else:
+                if h  >= sl: outcome = "LOSS"; exit_px = sl; break
+                if lo <= tp: outcome = "WIN";  exit_px = tp; break
+
+        if not outcome:
+            continue
+
+        pnl = (exit_px - entry_px) / entry_px * 100
+        if direction == "SHORT":
+            pnl = -pnl
+
+        trades.append({
+            "time":      str(row["open_time"])[:16],
+            "direction": direction,
+            "entry":     round(entry_px, 8),
+            "exit":      round(exit_px,  8),
+            "outcome":   outcome,
+            "pnl_pct":   round(pnl, 3),
+            "score":     int(score),
+        })
+
+    wins   = [t for t in trades if t["outcome"] == "WIN"]
+    losses = [t for t in trades if t["outcome"] == "LOSS"]
+    pnls   = [t["pnl_pct"] for t in trades]
+
+    cumulative, peak, max_dd = 0.0, 0.0, 0.0
+    for p in pnls:
+        cumulative += p
+        if cumulative > peak:
+            peak = cumulative
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+
+    return {
+        "symbol":    symbol,
+        "interval":  interval,
+        "days":      days,
+        "trades":    trades[-100:],
+        "total":     len(trades),
+        "wins":      len(wins),
+        "losses":    len(losses),
+        "win_rate":  round(len(wins) / len(trades) * 100, 1) if trades else 0.0,
+        "total_pnl": round(sum(pnls), 2),
+        "avg_win":   round(sum(t["pnl_pct"] for t in wins)   / len(wins),   3) if wins   else 0.0,
+        "avg_loss":  round(sum(t["pnl_pct"] for t in losses) / len(losses), 3) if losses else 0.0,
+        "max_dd":    round(max_dd, 2),
+    }
 
 
 # ---------------------------------------------------------------
