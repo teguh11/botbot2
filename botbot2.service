@@ -1,0 +1,18 @@
+[Unit]
+Description=CryptoBot Signal Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/botbot2
+ExecStart=/opt/botbot2/venv/bin/python web_server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
