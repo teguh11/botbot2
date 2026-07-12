@@ -241,12 +241,12 @@ async def _execute_orders(signals: list):
 
 
 async def _pnl_updater():
-    """Poll Binance every 5 s and broadcast live PnL to all clients."""
+    """Broadcast live balance + PnL every 5 s to all connected clients."""
     trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
     loop   = asyncio.get_running_loop()
     while True:
         await asyncio.sleep(5)
-        if not _active_orders or not manager.active:
+        if not manager.active:
             continue
         try:
             snap = await loop.run_in_executor(executor, trader.get_account_snapshot)
@@ -388,6 +388,8 @@ async def index():
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await manager.connect(ws)
+    loop = asyncio.get_running_loop()
+
     await manager.send_to(ws, {
         "type": "init",
         "config": {
@@ -408,12 +410,78 @@ async def ws_endpoint(ws: WebSocket):
         "uptime":    _get_uptime(),
         "logs":      _log_buffer[-30:],
     })
+
+    # Push initial balance + positions as soon as client connects
+    async def _push_snap():
+        try:
+            trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+            snap   = await loop.run_in_executor(executor, trader.get_account_snapshot)
+            await manager.send_to(ws, {
+                "type":      "positions_update",
+                "positions": snap["positions"],
+                "balance":   snap["balance"],
+            })
+        except Exception:
+            pass
+    asyncio.create_task(_push_snap())
+
     try:
         while True:
             raw = await ws.receive_text()
             msg = json.loads(raw)
-            if msg.get("type") == "scan_now":
+            t   = msg.get("type")
+
+            if t == "scan_now":
                 asyncio.create_task(run_scan())
+
+            elif t == "get_candles":
+                sym = msg.get("symbol", "BTCUSDT").upper()
+                iv  = msg.get("interval", config.INTERVAL_ENTRY)
+                lim = int(msg.get("limit", 120))
+
+                async def _candles(s=sym, i=iv, n=lim):
+                    try:
+                        df = await loop.run_in_executor(executor, lambda: get_klines(s, i, n))
+                        candles = [
+                            {"time": int(r["open_time"].timestamp()), "open": float(r["open"]),
+                             "high": float(r["high"]), "low": float(r["low"]), "close": float(r["close"])}
+                            for _, r in df.iterrows()
+                        ]
+                        await manager.send_to(ws, {"type": "candles", "symbol": s, "candles": candles})
+                    except Exception as e:
+                        await manager.send_to(ws, {"type": "candles", "symbol": s, "candles": [], "error": str(e)})
+                asyncio.create_task(_candles())
+
+            elif t == "get_backtest":
+                sym = msg.get("symbol", "BTCUSDT").upper()
+
+                async def _bt(s=sym):
+                    try:
+                        result = await loop.run_in_executor(executor, lambda: run_backtest(
+                            s, interval=config.INTERVAL_ENTRY, days=30,
+                            min_score=config.MIN_SCORE,
+                            sl_atr_mult=config.SL_ATR_MULT,
+                            tp_rr=config.TP1_RR,
+                        ))
+                        await manager.send_to(ws, {"type": "backtest", "symbol": s, "data": result})
+                    except Exception as e:
+                        await manager.send_to(ws, {"type": "backtest", "symbol": s, "data": None, "error": str(e)})
+                asyncio.create_task(_bt())
+
+            elif t == "get_balance":
+                async def _bal():
+                    try:
+                        trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+                        snap   = await loop.run_in_executor(executor, trader.get_account_snapshot)
+                        await manager.send_to(ws, {
+                            "type":      "positions_update",
+                            "positions": snap["positions"],
+                            "balance":   snap["balance"],
+                        })
+                    except Exception:
+                        pass
+                asyncio.create_task(_bal())
+
     except WebSocketDisconnect:
         manager.disconnect(ws)
 

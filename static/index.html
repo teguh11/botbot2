@@ -646,7 +646,6 @@ function handleMsg(m) {
       if (m.last_scan) setLastScan(m.last_scan);
       if (m.next_scan) setNextScan(m.next_scan);
       if (m.logs) m.logs.forEach(addLog);
-      fetchBalance();
       break;
     case 'scanning':
       setScanning(true, m.count);
@@ -660,6 +659,25 @@ function handleMsg(m) {
     case 'log':
       addLog(m);
       break;
+    case 'candles':
+      if (charts.has(m.symbol) && m.candles && m.candles.length) {
+        const { series: cs, chart: cc } = charts.get(m.symbol);
+        candleCache.set(m.symbol, m.candles);
+        cs.setData(m.candles);
+        cc.timeScale().scrollToRealTime();
+      }
+      break;
+    case 'backtest': {
+      const uid3 = m.symbol.replace(/[^a-z0-9]/gi, '');
+      const el3  = document.getElementById('tab-' + uid3 + '-bt');
+      if (m.error || !m.data) {
+        if (el3) el3.innerHTML = `<div class="bt-loading">Error: ${esc(m.error || 'unknown')}</div>`;
+        break;
+      }
+      btCache.set(m.symbol, m.data);
+      if (el3 && el3.classList.contains('show')) renderBacktest(el3, m.data);
+      break;
+    }
     case 'candle_update':
       if (charts.has(m.symbol)) {
         charts.get(m.symbol).series.update(m.candle);
@@ -980,20 +998,18 @@ function addPriceLines(series, sig) {
   });
 }
 
-async function fetchAndSetCandles(symbol, series, chart) {
-  try {
-    const iv   = cfg.interval_entry || '15m';
-    const resp = await fetch(`${BASE}/api/candles/${symbol}?interval=${encodeURIComponent(iv)}&limit=120`);
-    const data = await resp.json();
-    candleCache.set(symbol, data);
-    series.setData(data);
-    chart.timeScale().scrollToRealTime();
-  } catch(e) {
-    console.error('Chart load error', symbol, e);
+function requestCandles(symbol) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type:     'get_candles',
+      symbol,
+      interval: cfg.interval_entry || '15m',
+      limit:    120,
+    }));
   }
 }
 
-async function initCharts(signals) {
+function initCharts(signals) {
   for (const sig of signals) {
     const uid       = sig.symbol.replace(/[^a-z0-9]/gi, '');
     const container = document.getElementById('chart-' + uid);
@@ -1004,7 +1020,6 @@ async function initCharts(signals) {
     addPriceLines(series, sig);
     charts.set(sig.symbol, { chart, series });
 
-    // Remove loading spinner
     const loader = container.querySelector('.chart-loading');
     if (loader) loader.remove();
 
@@ -1012,7 +1027,7 @@ async function initCharts(signals) {
       series.setData(candleCache.get(sig.symbol));
       chart.timeScale().scrollToRealTime();
     } else {
-      fetchAndSetCandles(sig.symbol, series, chart);
+      requestCandles(sig.symbol);
     }
   }
 }
@@ -1104,48 +1119,29 @@ function applyPositionsPnl(positions, balance) {
   }
 }
 
-async function fetchBalance() {
-  try {
-    const resp = await fetch(`${BASE}/api/balance`);
-    if (!resp.ok) return;
-    const d = await resp.json();
-    const el = document.getElementById('ordersBalance');
-    if (el) el.textContent = `Balance: ${d.balance.toFixed(2)} USDT`;
-  } catch(_) {}
-}
-
-async function refreshPnl() {
-  const btn = document.getElementById('btnRefreshPnl');
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
-  try {
-    const resp = await fetch(`${BASE}/api/positions`);
-    if (!resp.ok) throw new Error(resp.status);
-    const data = await resp.json();
-    applyPositionsPnl(data, undefined);
-    fetchBalance();
-  } catch(e) {
-    console.error('refreshPnl error:', e);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh PnL'; }
+function refreshPnl() {
+  if (ws && ws.readyState === 1) {
+    const btn = document.getElementById('btnRefreshPnl');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    ws.send(JSON.stringify({ type: 'get_balance' }));
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+    }, 2000);
   }
 }
 
 // ── BACKTEST ───────────────────────────────────────────────────
 const btCache = new Map(); // symbol → result (cleared on new signals)
 
-async function loadBacktest(uid, symbol) {
+function loadBacktest(uid, symbol) {
   const el = document.getElementById('tab-' + uid + '-bt');
   if (!el) return;
   if (btCache.has(symbol)) { renderBacktest(el, btCache.get(symbol)); return; }
   el.innerHTML = '<div class="bt-loading"><span class="spin"></span> Running backtest…</div>';
-  try {
-    const resp = await fetch(`${BASE}/api/backtest/${symbol}`);
-    if (!resp.ok) throw new Error(resp.status);
-    const data = await resp.json();
-    btCache.set(symbol, data);
-    renderBacktest(el, data);
-  } catch(e) {
-    el.innerHTML = '<div class="bt-loading">Gagal load backtest</div>';
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'get_backtest', symbol }));
+  } else {
+    el.innerHTML = '<div class="bt-loading">WebSocket tidak terhubung</div>';
   }
 }
 
