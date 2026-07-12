@@ -676,6 +676,9 @@ function handleMsg(m) {
       allOrders.unshift(m.order);
       renderOrders();
       break;
+    case 'positions_update':
+      applyPositionsPnl(m.positions, m.balance);
+      break;
     case 'heartbeat':
       if (m.uptime) setUptime(m.uptime);
       break;
@@ -1052,7 +1055,7 @@ function renderOrders() {
       <td style="color:var(--long)">${fmtPrice(o.tp1)}</td>
       <td>${o.qty}</td>
       <td>${o.margin_usdt} USDT × ${o.leverage}x</td>
-      <td class="${pnlCls}">${pnlSign}${pnl.toFixed(2)}%<br><span style="font-size:10px;color:var(--muted)">${pnlSign}${(o.pnl||0).toFixed(4)} USDT</span></td>
+      <td class="${pnlCls}" data-pnl-sym="${o.symbol}">${pnlSign}${pnl.toFixed(2)}%<br><span style="font-size:10px;color:var(--muted)">${pnlSign}${(o.pnl||0).toFixed(4)} USDT</span></td>
       <td><span class="status-badge ${o.status.toLowerCase()}">${o.status}</span></td>
       <td style="color:var(--muted);font-size:10px">${dtStr}</td>
     </tr>`;
@@ -1067,6 +1070,38 @@ function renderOrders() {
       <tbody>${rows}</tbody>
     </table>
   </div>`;
+}
+
+function applyPositionsPnl(positions, balance) {
+  const map = {};
+  (positions || []).forEach(p => { map[p.symbol] = p; });
+
+  // Update in-memory order state
+  allOrders.forEach(o => {
+    if (map[o.symbol]) {
+      o.pnl     = map[o.symbol].pnl;
+      o.pnl_pct = map[o.symbol].pnl_pct;
+    }
+  });
+
+  // Patch PnL cells in-place (no full table re-render)
+  document.querySelectorAll('[data-pnl-sym]').forEach(cell => {
+    const o = allOrders.find(x => x.symbol === cell.dataset.pnlSym);
+    if (!o) return;
+    const pnl    = o.pnl_pct || 0;
+    const pnlCls = Math.abs(pnl) < 0.01 ? 'pnl-neu' : (pnl >= 0 ? 'pnl-pos' : 'pnl-neg');
+    const sign   = pnl > 0 ? '+' : '';
+    cell.className = pnlCls;
+    cell.setAttribute('data-pnl-sym', o.symbol);
+    cell.innerHTML  = `${sign}${pnl.toFixed(2)}%<br>`
+      + `<span style="font-size:10px;color:var(--muted)">${sign}${(o.pnl||0).toFixed(4)} USDT</span>`;
+  });
+
+  // Update balance display
+  if (balance !== undefined) {
+    const el = document.getElementById('ordersBalance');
+    if (el) el.textContent = `Balance: ${balance.toFixed(2)} USDT`;
+  }
 }
 
 async function fetchBalance() {
@@ -1085,15 +1120,8 @@ async function refreshPnl() {
   try {
     const resp = await fetch(`${BASE}/api/positions`);
     if (!resp.ok) throw new Error(resp.status);
-    const positions = await resp.json();
-    const map = {};
-    positions.forEach(p => { map[p.symbol] = p; });
-    allOrders = allOrders.map(o => {
-      const pos = map[o.symbol];
-      if (pos) { o.pnl = pos.pnl; o.pnl_pct = pos.pnl_pct; }
-      return o;
-    });
-    renderOrders();
+    const data = await resp.json();
+    applyPositionsPnl(data, undefined);
     fetchBalance();
   } catch(e) {
     console.error('refreshPnl error:', e);

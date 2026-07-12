@@ -240,6 +240,25 @@ async def _execute_orders(signals: list):
             await _add_log("WARN", "Order skip {}: {}".format(symbol, e))
 
 
+async def _pnl_updater():
+    """Poll Binance every 5 s and broadcast live PnL to all clients."""
+    trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+    loop   = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(5)
+        if not _active_orders or not manager.active:
+            continue
+        try:
+            snap = await loop.run_in_executor(executor, trader.get_account_snapshot)
+            await manager.broadcast({
+                "type":      "positions_update",
+                "positions": snap["positions"],
+                "balance":   snap["balance"],
+            })
+        except Exception as e:
+            log.debug("pnl_updater: %r", e)
+
+
 async def _auto_scanner():
     while True:
         wait = max(_next_scan_epoch() - time.time(), 5)
@@ -299,6 +318,7 @@ async def lifespan(_app: FastAPI):
     asyncio.create_task(_auto_scanner())
     asyncio.create_task(_heartbeat())
     asyncio.create_task(_binance_ws_updater())
+    asyncio.create_task(_pnl_updater())
     log.info("Dashboard siap di http://localhost:8000")
     yield
 

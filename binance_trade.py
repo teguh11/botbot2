@@ -136,6 +136,31 @@ class BinanceTrader:
     def open_symbols(self) -> set:
         return {p["symbol"] for p in self.get_open_positions()}
 
+    def get_account_snapshot(self) -> dict:
+        """Single API call → balance + open positions with PnL."""
+        data    = self._get("/fapi/v2/account")
+        balance = 0.0
+        for a in data.get("assets", []):
+            if a["asset"] == "USDT":
+                balance = float(a["availableBalance"])
+                break
+        positions = []
+        for p in data.get("positions", []):
+            amt = float(p.get("positionAmt", 0))
+            if amt == 0:
+                continue
+            init_margin = float(p.get("initialMargin", 1)) or 1
+            upnl        = float(p.get("unrealizedProfit", 0))
+            positions.append({
+                "symbol":    p["symbol"],
+                "direction": "LONG" if amt > 0 else "SHORT",
+                "qty":       abs(amt),
+                "entry":     float(p.get("entryPrice", 0)),
+                "pnl":       round(upnl, 4),
+                "pnl_pct":   round(upnl / init_margin * 100, 2),
+            })
+        return {"balance": round(balance, 2), "positions": positions}
+
     # ── Orders ────────────────────────────────────────────────
     def set_leverage(self, symbol: str, leverage: int):
         try:
