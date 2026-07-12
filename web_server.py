@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import requests
+import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
@@ -190,33 +191,45 @@ async def _auto_scanner():
         await run_scan()
 
 
-def _fetch_latest_candle(symbol: str) -> Optional[dict]:
-    try:
-        df  = get_klines(symbol, config.INTERVAL_ENTRY, 2)
-        row = df.iloc[-1]
-        return {
-            "time":  int(row["open_time"].timestamp()),
-            "open":  float(row["open"]),
-            "high":  float(row["high"]),
-            "low":   float(row["low"]),
-            "close": float(row["close"]),
-        }
-    except Exception:
-        return None
-
-
-async def _candle_updater():
+async def _binance_ws_updater():
+    """Connect to Binance Futures WebSocket and forward kline updates to clients."""
+    BINANCE_WS = "wss://fstream.binance.com/stream?streams={streams}"
     while True:
-        await asyncio.sleep(5)
-        if not _last_signals or not manager.active:
+        if not _last_signals:
+            await asyncio.sleep(5)
             continue
-        loop    = asyncio.get_running_loop()
+
         symbols = [s["symbol"] for s in _last_signals[:20]]
-        tasks   = [loop.run_in_executor(executor, _fetch_latest_candle, sym) for sym in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for sym, candle in zip(symbols, results):
-            if isinstance(candle, dict):
-                await manager.broadcast({"type": "candle_update", "symbol": sym, "candle": candle})
+        iv      = config.INTERVAL_ENTRY
+        streams = "/".join(f"{sym.lower()}@kline_{iv}" for sym in symbols)
+        url     = BINANCE_WS.format(streams=streams)
+
+        try:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=10) as bws:
+                log.info("Binance WS connected: %d streams (%s)", len(symbols), iv)
+                async for raw in bws:
+                    msg  = json.loads(raw)
+                    data = msg.get("data", {})
+                    if data.get("e") != "kline":
+                        continue
+                    k = data["k"]
+                    await manager.broadcast({
+                        "type":   "candle_update",
+                        "symbol": data["s"],
+                        "candle": {
+                            "time":  k["t"] // 1000,
+                            "open":  float(k["o"]),
+                            "high":  float(k["h"]),
+                            "low":   float(k["l"]),
+                            "close": float(k["c"]),
+                        },
+                    })
+                    # Reconnect when scan produces a new symbol set
+                    if [s["symbol"] for s in _last_signals[:20]] != symbols:
+                        break
+        except Exception as e:
+            log.warning("Binance WS: %r — reconnect in 5s", e)
+            await asyncio.sleep(5)
 
 
 async def _heartbeat():
@@ -229,7 +242,7 @@ async def _heartbeat():
 async def lifespan(_app: FastAPI):
     asyncio.create_task(_auto_scanner())
     asyncio.create_task(_heartbeat())
-    asyncio.create_task(_candle_updater())
+    asyncio.create_task(_binance_ws_updater())
     log.info("Dashboard siap di http://localhost:8000")
     yield
 
