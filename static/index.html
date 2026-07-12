@@ -363,6 +363,67 @@ main{padding:16px 20px;min-height:50vh}
   animation:spin .7s linear infinite;
 }
 
+/* ── ORDERS PANEL ────────────────────────────────────── */
+.orders-panel{
+  margin:0 20px 16px;border-radius:var(--radius);
+  border:1px solid var(--border);overflow:hidden;
+}
+.orders-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px;background:var(--bg3);
+  border-bottom:1px solid var(--border);
+}
+.orders-title{font-size:12px;font-weight:700;display:flex;align-items:center;gap:8px}
+.orders-meta{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)}
+.orders-badge{
+  padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;
+  background:var(--bg4);border:1px solid var(--border2);color:var(--text);
+}
+.orders-balance{
+  font-family:var(--mono);font-size:11px;color:var(--accent);
+}
+.btn-refresh{
+  padding:4px 10px;border-radius:5px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);font-size:11px;cursor:pointer;
+  transition:all .15s;
+}
+.btn-refresh:hover{color:var(--text);border-color:var(--border2)}
+.btn-refresh:disabled{opacity:.4;cursor:not-allowed}
+.orders-empty{
+  padding:28px;text-align:center;color:var(--muted);font-size:12px;
+  background:var(--bg);
+}
+.orders-table-wrap{overflow-x:auto;background:var(--bg)}
+.orders-table{
+  width:100%;border-collapse:collapse;
+  font-family:var(--mono);font-size:11px;
+}
+.orders-table th{
+  color:var(--muted);text-align:left;padding:6px 12px;
+  border-bottom:1px solid var(--border);background:var(--bg3);
+  font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  white-space:nowrap;
+}
+.orders-table td{
+  padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.03);
+  white-space:nowrap;
+}
+.orders-table tr:last-child td{border-bottom:none}
+.orders-table tr:hover td{background:rgba(255,255,255,.02)}
+.pnl-pos{color:var(--long);font-weight:700}
+.pnl-neg{color:var(--short);font-weight:700}
+.pnl-neu{color:var(--muted)}
+.status-badge{
+  padding:2px 7px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.4px;
+}
+.status-badge.open{background:rgba(77,143,255,.15);color:var(--accent)}
+.status-badge.closed{background:rgba(107,130,158,.15);color:var(--muted)}
+.testnet-tag{
+  font-size:9px;padding:2px 6px;border-radius:3px;
+  background:rgba(245,200,66,.15);color:var(--gold);
+  border:1px solid rgba(245,200,66,.3);font-weight:700;letter-spacing:.3px;
+}
+
 /* ── BACKTEST ────────────────────────────────────────── */
 .bt-stats{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
 .bt-stat{
@@ -503,6 +564,27 @@ main{padding:16px 20px;min-height:50vh}
   </div>
 </main>
 
+<!-- ── ORDERS PANEL ── -->
+<div class="orders-panel" id="ordersPanel">
+  <div class="orders-head">
+    <div class="orders-title">
+      ⚡ Active Orders
+      <span class="orders-badge" id="ordersCount">0</span>
+      <span class="testnet-tag" id="testnetTag" style="display:none">TESTNET</span>
+    </div>
+    <div class="orders-meta">
+      <span class="orders-balance" id="ordersBalance"></span>
+      <button class="btn-refresh" id="btnRefreshPnl" onclick="refreshPnl()">↻ Refresh PnL</button>
+    </div>
+  </div>
+  <div id="ordersBody">
+    <div class="orders-empty" id="ordersEmpty">
+      Auto-trading belum aktif atau belum ada signal TINGGI.
+      Set <code>AUTO_TRADE=true</code> di <code>.env</code> untuk mulai.
+    </div>
+  </div>
+</div>
+
 <!-- ── LOG PANEL ── -->
 <div class="log-panel">
   <div class="log-head">
@@ -515,7 +597,7 @@ main{padding:16px 20px;min-height:50vh}
 <script>
 // ── STATE ──────────────────────────────────────────────────────
 let ws = null, reconnTimer = null;
-let allSignals = [], cfg = {};
+let allSignals = [], cfg = {}, allOrders = [];
 let activeDir = 'all', activeConf = 'all';
 let nextScanEpoch = 0;
 
@@ -557,11 +639,14 @@ function handleMsg(m) {
       updateStats(null, null);
       document.getElementById('statLev').textContent  = cfg.leverage + 'x';
       document.getElementById('statMode').textContent = cfg.auto_trade ? '🤖 Auto' : '👁 Watch';
+      if (cfg.testnet) document.getElementById('testnetTag').style.display = '';
       if (m.uptime) setUptime(m.uptime);
       if (m.signals && m.signals.length) renderSignals(m.signals, m.scan_count || 0);
+      if (m.orders)  { allOrders = m.orders; renderOrders(); }
       if (m.last_scan) setLastScan(m.last_scan);
       if (m.next_scan) setNextScan(m.next_scan);
       if (m.logs) m.logs.forEach(addLog);
+      fetchBalance();
       break;
     case 'scanning':
       setScanning(true, m.count);
@@ -586,6 +671,10 @@ function handleMsg(m) {
           else cached.push(m.candle);
         }
       }
+      break;
+    case 'order_placed':
+      allOrders.unshift(m.order);
+      renderOrders();
       break;
     case 'heartbeat':
       if (m.uptime) setUptime(m.uptime);
@@ -933,6 +1022,85 @@ window.addEventListener('resize', () => {
     if (el) chart.applyOptions({ width: el.clientWidth });
   });
 });
+
+// ── ORDERS ─────────────────────────────────────────────────────
+function renderOrders() {
+  const body  = document.getElementById('ordersBody');
+  const badge = document.getElementById('ordersCount');
+  const open  = allOrders.filter(o => o.status === 'OPEN');
+  badge.textContent = allOrders.length;
+
+  if (!allOrders.length) {
+    body.innerHTML = '<div class="orders-empty" id="ordersEmpty">Auto-trading belum aktif atau belum ada signal TINGGI.<br>Set <code>AUTO_TRADE=true</code> di <code>.env</code> untuk mulai.</div>';
+    return;
+  }
+
+  const rows = allOrders.map(o => {
+    const isLong = o.direction === 'LONG';
+    const dirCls = isLong ? 'long' : 'short';
+    const pnl    = o.pnl_pct || 0;
+    const pnlCls = Math.abs(pnl) < 0.01 ? 'pnl-neu' : (pnl >= 0 ? 'pnl-pos' : 'pnl-neg');
+    const pnlSign = pnl > 0 ? '+' : '';
+    const dt = new Date(o.created_at * 1000);
+    const dtStr = dt.toLocaleDateString('id-ID', {month:'short',day:'numeric'})
+                + ' ' + dt.toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'});
+    return `<tr data-sym="${o.symbol}">
+      <td><strong>${o.symbol}</strong></td>
+      <td><span class="dir-badge ${dirCls}" style="font-size:9px;padding:2px 8px">${o.direction}</span></td>
+      <td>${fmtPrice(o.entry)}</td>
+      <td style="color:var(--short)">${fmtPrice(o.sl)}</td>
+      <td style="color:var(--long)">${fmtPrice(o.tp1)}</td>
+      <td>${o.qty}</td>
+      <td>${o.margin_usdt} USDT × ${o.leverage}x</td>
+      <td class="${pnlCls}">${pnlSign}${pnl.toFixed(2)}%<br><span style="font-size:10px;color:var(--muted)">${pnlSign}${(o.pnl||0).toFixed(4)} USDT</span></td>
+      <td><span class="status-badge ${o.status.toLowerCase()}">${o.status}</span></td>
+      <td style="color:var(--muted);font-size:10px">${dtStr}</td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `<div class="orders-table-wrap">
+    <table class="orders-table">
+      <thead><tr>
+        <th>Symbol</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th>
+        <th>Qty</th><th>Margin / Lev</th><th>PnL</th><th>Status</th><th>Waktu</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+async function fetchBalance() {
+  try {
+    const resp = await fetch(`${BASE}/api/balance`);
+    if (!resp.ok) return;
+    const d = await resp.json();
+    const el = document.getElementById('ordersBalance');
+    if (el) el.textContent = `Balance: ${d.balance.toFixed(2)} USDT`;
+  } catch(_) {}
+}
+
+async function refreshPnl() {
+  const btn = document.getElementById('btnRefreshPnl');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const resp = await fetch(`${BASE}/api/positions`);
+    if (!resp.ok) throw new Error(resp.status);
+    const positions = await resp.json();
+    const map = {};
+    positions.forEach(p => { map[p.symbol] = p; });
+    allOrders = allOrders.map(o => {
+      const pos = map[o.symbol];
+      if (pos) { o.pnl = pos.pnl; o.pnl_pct = pos.pnl_pct; }
+      return o;
+    });
+    renderOrders();
+    fetchBalance();
+  } catch(e) {
+    console.error('refreshPnl error:', e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh PnL'; }
+  }
+}
 
 // ── BACKTEST ───────────────────────────────────────────────────
 const btCache = new Map(); // symbol → result (cleared on new signals)

@@ -21,6 +21,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 import config
+from binance_trade import BinanceTrader
 from crypto_signal import get_mtf_signal, get_klines, run_backtest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -35,6 +36,7 @@ _last_signals:   list              = []
 _last_scan_time: Optional[datetime] = None
 _is_scanning:    bool               = False
 _log_buffer:     list              = []
+_active_orders:  list              = []   # orders placed this session
 
 
 def _fmt_uptime(seconds: float) -> str:
@@ -178,10 +180,64 @@ async def run_scan():
             "INFO",
             "Scan selesai — {} sinyal dari {} coin".format(len(signals), len(symbols))
         )
+        if config.AUTO_TRADE and signals:
+            await _execute_orders(signals)
     except Exception as e:
         await _add_log("ERROR", str(e))
     finally:
         _is_scanning = False
+
+
+async def _execute_orders(signals: list):
+    """Place orders for TINGGI signals if AUTO_TRADE is enabled."""
+    global _active_orders
+    loop   = asyncio.get_running_loop()
+    trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+    try:
+        balance = await loop.run_in_executor(executor, trader.get_balance)
+        margin  = round(balance * config.CAPITAL_PCT, 4)
+        await _add_log("INFO",
+            "Balance: {:.2f} USDT | Margin/trade: {:.2f} USDT ({:.1f}%)".format(
+                balance, margin, config.CAPITAL_PCT * 100
+            )
+        )
+        # Fetch open symbols once to avoid duplicate positions
+        open_syms = await loop.run_in_executor(executor, trader.open_symbols)
+    except Exception as e:
+        await _add_log("ERROR", "Trader init: {}".format(e))
+        return
+
+    already = {o["symbol"] for o in _active_orders if o["status"] == "OPEN"}
+
+    for sig in signals:
+        if sig.get("confidence") != "TINGGI":
+            continue
+        symbol = sig["symbol"]
+        if symbol in open_syms or symbol in already:
+            continue
+
+        def _place(s=sig, m=margin):
+            return trader.place_signal_order(
+                symbol=s["symbol"], direction=s["direction"],
+                entry=s["price"], sl=s["sl"], tp1=s["tp1"], tp2=s["tp2"],
+                usdt_margin=m, leverage=config.LEVERAGE,
+            )
+
+        try:
+            order = await loop.run_in_executor(executor, _place)
+            _active_orders.append(order)
+            if len(_active_orders) > 500:
+                _active_orders = _active_orders[-500:]
+            await manager.broadcast({"type": "order_placed", "order": order})
+            await _add_log(
+                "INFO",
+                "Order ✓ {} {} @ {} | margin={} USDT | id={}".format(
+                    symbol, sig["direction"], sig["price"],
+                    margin, order["order_id"]
+                )
+            )
+        except Exception as e:
+            await _add_log("WARN", "Order skip {}: {}".format(symbol, e))
 
 
 async def _auto_scanner():
@@ -253,6 +309,26 @@ app = FastAPI(lifespan=lifespan)
 # ---------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------
+@app.get("/api/orders")
+async def api_orders():
+    return _active_orders
+
+
+@app.get("/api/positions")
+async def api_positions():
+    loop   = asyncio.get_running_loop()
+    trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+    return await loop.run_in_executor(executor, trader.get_open_positions)
+
+
+@app.get("/api/balance")
+async def api_balance():
+    loop   = asyncio.get_running_loop()
+    trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+    bal    = await loop.run_in_executor(executor, trader.get_balance)
+    return {"balance": bal, "testnet": config.TESTNET, "capital_pct": config.CAPITAL_PCT}
+
+
 @app.get("/api/backtest/{symbol}")
 async def api_backtest(symbol: str, days: int = 30, interval: str = "15m"):
     loop   = asyncio.get_running_loop()
@@ -300,10 +376,13 @@ async def ws_endpoint(ws: WebSocket):
             "leverage":       config.LEVERAGE,
             "margin_usdt":    config.MARGIN_USDT,
             "auto_trade":     config.AUTO_TRADE,
+            "testnet":        config.TESTNET,
+            "capital_pct":    config.CAPITAL_PCT,
             "scan_limit":     config.SCAN_LIMIT,
             "min_score":      config.MIN_SCORE,
         },
         "signals":   _last_signals,
+        "orders":    _active_orders,
         "last_scan": _last_scan_time.isoformat() if _last_scan_time else None,
         "next_scan": _next_scan_epoch(),
         "uptime":    _get_uptime(),

@@ -16,4 +16,6 @@ SL_ATR_MULT      = float(os.getenv("SL_ATR_MULT", "1.5"))
 TP1_RR           = float(os.getenv("TP1_RR",      "1.5"))
 TP2_RR           = float(os.getenv("TP2_RR",      "3.0"))
 MIN_SCORE        = int(os.getenv("MIN_SCORE",    "3"))
-AUTO_TRADE       = os.getenv("AUTO_TRADE", "false").lower() == "true"
+AUTO_TRADE       = os.getenv("AUTO_TRADE",    "false").lower() == "true"
+TESTNET          = os.getenv("TESTNET",       "true").lower()  == "true"
+CAPITAL_PCT      = float(os.getenv("CAPITAL_PCT",  "0.002"))    # 0.2% per trade
