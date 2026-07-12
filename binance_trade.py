@@ -136,6 +136,27 @@ class BinanceTrader:
     def open_symbols(self) -> set:
         return {p["symbol"] for p in self.get_open_positions()}
 
+    # ── User Data Stream ──────────────────────────────────────
+    def get_listen_key(self) -> str:
+        """Create a User Data Stream listen key (no signature required)."""
+        r = requests.post(
+            f"{self.base}/fapi/v1/listenKey",
+            headers=self._hdrs(),
+            timeout=10,
+        )
+        if not r.ok:
+            raise RuntimeError(f"listenKey {r.status_code}: {r.text[:200]}")
+        return r.json()["listenKey"]
+
+    def keepalive_listen_key(self, listen_key: str) -> None:
+        """Extend listen key validity by 60 min (call every ≤30 min)."""
+        requests.put(
+            f"{self.base}/fapi/v1/listenKey",
+            params={"listenKey": listen_key},
+            headers=self._hdrs(),
+            timeout=10,
+        )
+
     def get_account_snapshot(self) -> dict:
         """Single API call → balance + open positions with PnL."""
         data    = self._get("/fapi/v2/account")

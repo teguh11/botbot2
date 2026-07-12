@@ -694,6 +694,18 @@ function handleMsg(m) {
       allOrders.unshift(m.order);
       renderOrders();
       break;
+    case 'order_update':
+      if (m.status === 'FILLED') {
+        let changed = false;
+        allOrders = allOrders.map(o => {
+          if (o.sl_order_id === m.order_id || o.tp1_order_id === m.order_id) {
+            o.status = 'CLOSED'; changed = true;
+          }
+          return o;
+        });
+        if (changed) renderOrders();
+      }
+      break;
     case 'positions_update':
       applyPositionsPnl(m.positions, m.balance);
       break;

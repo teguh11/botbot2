@@ -259,6 +259,86 @@ async def _pnl_updater():
             log.debug("pnl_updater: %r", e)
 
 
+async def _user_data_stream():
+    """
+    Binance Futures User Data Stream.
+    Pushes real-time balance + position updates (ACCOUNT_UPDATE) and
+    order fill events (ORDER_TRADE_UPDATE) the moment they happen.
+    """
+    WS_BASE = (
+        "wss://stream.binancefuture.com/ws" if config.TESTNET
+        else "wss://fstream.binance.com/ws"
+    )
+    trader = BinanceTrader(config.API_KEY, config.API_SECRET, testnet=config.TESTNET)
+    loop   = asyncio.get_running_loop()
+
+    while True:
+        try:
+            listen_key = await loop.run_in_executor(executor, trader.get_listen_key)
+            url        = f"{WS_BASE}/{listen_key}"
+            log.info("User Data Stream connecting…")
+
+            async with websockets.connect(url, ping_interval=30, ping_timeout=10) as uws:
+                log.info("User Data Stream connected (key=%s…)", listen_key[:8])
+
+                async def _keepalive():
+                    while True:
+                        await asyncio.sleep(1800)          # renew every 30 min
+                        try:
+                            await loop.run_in_executor(
+                                executor,
+                                lambda: trader.keepalive_listen_key(listen_key),
+                            )
+                        except Exception:
+                            pass
+
+                ka = asyncio.create_task(_keepalive())
+                try:
+                    async for raw in uws:
+                        msg   = json.loads(raw)
+                        event = msg.get("e")
+
+                        if event == "ACCOUNT_UPDATE":
+                            # Balance or position changed — fetch fresh snapshot
+                            try:
+                                snap = await loop.run_in_executor(
+                                    executor, trader.get_account_snapshot
+                                )
+                                await manager.broadcast({
+                                    "type":      "positions_update",
+                                    "positions": snap["positions"],
+                                    "balance":   snap["balance"],
+                                })
+                            except Exception:
+                                pass
+
+                        elif event == "ORDER_TRADE_UPDATE":
+                            od     = msg.get("o", {})
+                            oid    = str(od.get("i", ""))
+                            status = od.get("X", "")      # execution status
+                            symbol = od.get("s", "")
+
+                            if status == "FILLED":
+                                for o in _active_orders:
+                                    if o.get("sl_order_id") == oid or o.get("tp1_order_id") == oid:
+                                        o["status"] = "CLOSED"
+                                        break
+
+                            if manager.active:
+                                await manager.broadcast({
+                                    "type":     "order_update",
+                                    "order_id": oid,
+                                    "status":   status,
+                                    "symbol":   symbol,
+                                })
+                finally:
+                    ka.cancel()
+
+        except Exception as e:
+            log.warning("User Data Stream: %r — reconnect in 10s", e)
+            await asyncio.sleep(10)
+
+
 async def _auto_scanner():
     while True:
         wait = max(_next_scan_epoch() - time.time(), 5)
@@ -318,7 +398,8 @@ async def lifespan(_app: FastAPI):
     asyncio.create_task(_auto_scanner())
     asyncio.create_task(_heartbeat())
     asyncio.create_task(_binance_ws_updater())
-    asyncio.create_task(_pnl_updater())
+    asyncio.create_task(_pnl_updater())       # continuous PnL ticking every 5 s
+    asyncio.create_task(_user_data_stream())  # instant balance & order events
     log.info("Dashboard siap di http://localhost:8000")
     yield
 
