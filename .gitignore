@@ -1,7 +1,22 @@
+# ── Secrets ──────────────────────────────────────────────────
 .env
 *.log
+
+# ── Python / venv ────────────────────────────────────────────
+.venv/
 __pycache__/
 *.pyc
-master/
 *.swp
 *.swo
+
+# ── Freqtrade user_data (large / generated) ──────────────────
+user_data/data/
+user_data/logs/
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/plot/
+user_data/models/
+tradesv3.sqlite*
+
+# ── Old custom-bot leftovers ─────────────────────────────────
+master/

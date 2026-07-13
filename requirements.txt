@@ -1,7 +1,6 @@
-requests>=2.31.0
-pandas>=2.0.0
-numpy>=1.24.0
-python-dotenv>=1.0.0
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-websockets>=12.0
+# Freqtrade native install (Python 3.12).
+# TA-Lib C library required first:  brew install ta-lib   (macOS)
+#                                   apt install ta-lib     (Ubuntu, via ppa/source)
+freqtrade==2026.6
+scipy
+scikit-learn
