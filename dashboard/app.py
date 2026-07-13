@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List
@@ -34,6 +35,21 @@ POLL_SECS   = float(os.getenv("DASH_POLL_SECS", "3"))
 
 _auth  = httpx.BasicAuth(FT_USERNAME, FT_PASSWORD)
 _last_snapshot: dict = {"connected": False}
+
+# Mode switching (nfi = sabar/proven, active = agresif)
+MODE_FILE = Path(__file__).parent.parent / "user_data" / "active_mode"
+MODES = {
+    "nfi":    {"label": "NFI (Sabar)",   "strategy": "NFIX7Verbose"},
+    "active": {"label": "Active (Agresif)", "strategy": "SupertrendSD"},
+}
+
+
+def read_mode() -> str:
+    try:
+        m = MODE_FILE.read_text().strip()
+        return m if m in MODES else "nfi"
+    except Exception:
+        return "nfi"
 
 
 # ── Browser WebSocket manager ─────────────────────────────────
@@ -112,6 +128,8 @@ async def build_snapshot(client: httpx.AsyncClient) -> dict:
         "connected": True,
         "state":     cfg.get("state", "unknown"),
         "dry_run":   cfg.get("dry_run", True),
+        "mode":      read_mode(),
+        "strategy":  cfg.get("strategy"),
         "trading_mode": cfg.get("trading_mode"),
         "timeframe": cfg.get("timeframe"),
         "balance":   round(balance.get("total", 0) or 0, 2),
@@ -166,6 +184,36 @@ async def index():
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "ft_connected": _last_snapshot.get("connected", False)}
+
+
+@app.get("/api/mode")
+async def get_mode():
+    return {"mode": read_mode(), "modes": MODES}
+
+
+@app.post("/api/mode/{mode}")
+async def set_mode(mode: str):
+    if mode not in MODES:
+        return {"ok": False, "error": f"mode tidak valid: {mode}"}
+    try:
+        MODE_FILE.write_text(mode + "\n")
+    except Exception as e:
+        return {"ok": False, "error": f"gagal tulis mode: {e}"}
+    # restart freqtrade agar strategy baru aktif
+    try:
+        r = subprocess.run(
+            ["sudo", "systemctl", "restart", "freqtrade"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return {"ok": True, "mode": mode, "restarted": False,
+                    "note": "mode tersimpan; restart gagal (jalankan manual): " + (r.stderr or "").strip()[:200]}
+    except Exception as e:
+        return {"ok": True, "mode": mode, "restarted": False,
+                "note": f"mode tersimpan; restart tidak bisa dari sini ({e})"}
+    log.info("Mode switched → %s (freqtrade restarting)", mode)
+    return {"ok": True, "mode": mode, "restarted": True,
+            "strategy": MODES[mode]["strategy"]}
 
 
 @app.websocket("/ws")

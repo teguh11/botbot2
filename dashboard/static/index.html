@@ -27,6 +27,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .badge.on .dot{background:var(--long);box-shadow:0 0 6px var(--long)}
 .badge.off .dot{background:var(--short);box-shadow:0 0 6px var(--short)}
 .badge.mode{color:var(--gold);border-color:rgba(245,200,66,.3)}
+.mode-btn{padding:5px 12px;border-radius:8px;border:1px solid var(--border2);background:var(--bg4);color:var(--text);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.mode-btn:hover{background:var(--accent);border-color:var(--accent)}
+.mode-btn:disabled{opacity:.5;cursor:not-allowed}
+.mode-btn.to-active{color:var(--short)}
+.mode-btn.to-nfi{color:var(--long)}
 
 .stats{display:flex;flex-wrap:wrap;gap:0;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;overflow-x:auto}
 .stat{display:flex;flex-direction:column;padding:12px 22px;border-right:1px solid var(--border);flex-shrink:0}
@@ -86,6 +91,7 @@ main{padding:18px 20px}
     <div><div class="brand-name">botbot2</div><div class="brand-sub">Freqtrade · NFI Futures</div></div>
   </div>
   <div class="header-right">
+    <button class="mode-btn" id="modeBtn" onclick="switchMode()" style="display:none"></button>
     <span class="badge mode" id="modeBadge" style="display:none"></span>
     <span class="badge" id="stateBadge"><span class="dot"></span><span id="stateTxt">…</span></span>
     <span class="badge" id="wsBadge"><span class="dot"></span><span id="wsTxt">Connecting…</span></span>
@@ -116,7 +122,27 @@ main{padding:18px 20px}
 
 <script>
 const BASE = location.pathname.replace(/\/$/,'');
-let ws=null, reconn=null;
+let ws=null, reconn=null, switching=false;
+
+async function switchMode(){
+  const btn=document.getElementById('modeBtn');
+  const cur=btn.dataset.cur||'nfi';
+  const next=cur==='nfi'?'active':'nfi';
+  const nextLbl=next==='active'?'Active (Agresif — sering entry, less proven)':'NFI (Sabar — proven)';
+  if(!confirm(`Ganti ke mode ${nextLbl}?\n\nBot akan RESTART (~1-3 menit bot offline saat ganti).`)) return;
+  switching=true;
+  btn.disabled=true; btn.textContent='⏳ Mengganti mode & restart bot…';
+  try{
+    const r=await fetch(`${BASE}/api/mode/${next}`,{method:'POST'});
+    const j=await r.json();
+    if(j.ok){
+      btn.textContent=j.restarted?'✅ Mode diganti, bot restarting…':'⚠️ '+(j.note||'mode tersimpan');
+    }else{
+      btn.textContent='❌ '+(j.error||'gagal'); btn.disabled=false;
+    }
+  }catch(e){ btn.textContent='❌ error'; btn.disabled=false; }
+  setTimeout(()=>{ switching=false; btn.disabled=false; }, 8000);
+}
 
 function connect(){
   const host = ['0.0.0.0',''].includes(location.hostname) ? 'localhost:'+location.port : location.host;
@@ -152,6 +178,15 @@ function render(d){
 
   const mb=document.getElementById('modeBadge');
   mb.style.display=''; mb.textContent=(d.trading_mode||'').toUpperCase()+(d.dry_run?' · DRY-RUN':' · LIVE');
+
+  // mode switch button
+  const btn=document.getElementById('modeBtn');
+  if(d.mode && !switching){
+    btn.style.display='';
+    if(d.mode==='nfi'){ btn.textContent='Mode: NFI (Sabar) → ganti ke Active'; btn.className='mode-btn to-active'; }
+    else{ btn.textContent='Mode: Active (Agresif) → balik ke NFI'; btn.className='mode-btn to-nfi'; }
+    btn.dataset.cur=d.mode;
+  }
 
   // stats
   document.getElementById('sBalance').textContent = fmt(d.balance);

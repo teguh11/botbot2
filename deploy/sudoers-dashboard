@@ -1,0 +1,3 @@
+# Izinkan dashboard (user ubuntu) me-restart freqtrade tanpa password.
+# Dipasang ke /etc/sudoers.d/dashboard oleh deploy workflow.
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart freqtrade, /bin/systemctl restart freqtrade

@@ -103,6 +103,11 @@ jobs:
             fi
 
             echo "── 7. systemd services (freqtrade + dashboard) ────────"
+            chmod +x deploy/run-freqtrade.sh
+            # izinkan dashboard restart freqtrade (mode switch button)
+            sudo cp deploy/sudoers-dashboard /etc/sudoers.d/dashboard
+            sudo chmod 440 /etc/sudoers.d/dashboard
+            sudo visudo -c -f /etc/sudoers.d/dashboard
             sudo systemctl disable --now botbot2 2>/dev/null || true
             sudo cp deploy/freqtrade.service /etc/systemd/system/freqtrade.service
             sudo cp deploy/dashboard.service /etc/systemd/system/dashboard.service

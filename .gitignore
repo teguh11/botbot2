@@ -27,3 +27,4 @@ tradesv3*.sqlite*
 
 # ── Old custom-bot leftovers ─────────────────────────────────
 master/
+user_data/active_mode
