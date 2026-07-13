@@ -50,8 +50,13 @@ sudo systemctl restart freqtrade     # restart
 
 ## Catatan
 
-- **Dry-run** (paper trading). Untuk live butuh **akun SPOT Binance** — isi
-  `FREQTRADE__EXCHANGE__KEY/SECRET` di `.env` server & set `dry_run: false`.
-- Whitelist 20 pair (aman untuk RAM 2 GB). Naikkan bertahap kalau RAM lega;
-  pantau `free -h` / `systemctl status freqtrade`.
-- Kalau OOM-restart berulang: kurangi pair di `user_data/config_nfi.json`.
+- Service jalan pakai **`config_nfi_futures.json`** — Binance USDT-M **futures**,
+  isolated margin, leverage **3x**, long + short (max 6 long / 3 short).
+- **Dry-run** (paper trading). Untuk live: isi `FREQTRADE__EXCHANGE__KEY/SECRET`
+  (futures) di `.env` server & set `dry_run: false` di config.
+- ⚠️ **Risiko futures**: NFI averaging-down (DCA) ke posisi rugi. Di futures +
+  leverage ini bisa kena **likuidasi** kalau koin jatuh dalam & lama (backtest
+  window nggak menangkap skenario blow-up ini). Isolated margin membatasi kerugian
+  per posisi, tapi tetap lebih berisiko dari spot.
+- Whitelist 20 pair (aman untuk RAM 2 GB). Kalau OOM: kurangi pair di
+  `user_data/config_nfi_futures.json`.
