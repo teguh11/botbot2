@@ -110,6 +110,7 @@ async def build_snapshot(client: httpx.AsyncClient) -> dict:
     trades = []
     for t in status:
         trades.append({
+            "trade_id":   t.get("trade_id"),
             "pair":       t.get("pair"),
             "is_short":   t.get("is_short", False),
             "leverage":   t.get("leverage", 1),
@@ -189,6 +190,30 @@ async def healthz():
 @app.get("/api/mode")
 async def get_mode():
     return {"mode": read_mode(), "modes": MODES}
+
+
+async def _ft_post(path: str, payload: dict) -> dict:
+    try:
+        async with httpx.AsyncClient() as c:
+            r = await c.post(f"{FT_API_URL}/api/v1/{path}", json=payload, auth=_auth, timeout=15)
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text
+            return {"ok": r.is_success, "status": r.status_code, "detail": detail}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/forceentry")
+async def force_entry(pair: str = "BTC/USDT:USDT", side: str = "long"):
+    """Insert a test order (force enter). Requires force_entry_enable in config."""
+    return await _ft_post("forceenter", {"pair": pair, "side": side})
+
+
+@app.post("/api/forceexit/{trade_id}")
+async def force_exit(trade_id: str):
+    return await _ft_post("forceexit", {"tradeid": str(trade_id)})
 
 
 @app.post("/api/mode/{mode}")

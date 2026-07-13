@@ -46,7 +46,15 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 
 main{padding:18px 20px}
-.section-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:6px 0 12px}
+.section-row{display:flex;align-items:center;justify-content:space-between;margin:6px 0 12px}
+.section-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.act-btn{padding:6px 12px;border-radius:7px;border:1px solid var(--border2);background:var(--bg4);color:var(--text);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s}
+.act-btn:hover{background:var(--accent);border-color:var(--accent)}
+.act-btn:disabled{opacity:.5;cursor:not-allowed}
+.card-foot{display:flex;justify-content:flex-end;padding:0 14px 12px}
+.close-btn{padding:4px 12px;border-radius:6px;border:1px solid rgba(255,69,96,.4);background:transparent;color:var(--short);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s}
+.close-btn:hover{background:var(--short);color:#fff}
+.close-btn:disabled{opacity:.5;cursor:not-allowed}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;animation:fade .3s ease both}
 @keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -109,7 +117,10 @@ main{padding:18px 20px}
 <div class="scan-banner" id="scanBanner"><div class="scan-ring"></div><span id="scanTxt">Menghubungkan ke freqtrade…</span></div>
 
 <main>
-  <div class="section-title">Posisi Terbuka</div>
+  <div class="section-row">
+    <div class="section-title">Posisi Terbuka</div>
+    <button class="act-btn" id="testBtn" onclick="forceEntry()">🧪 Test Order (BTC Long)</button>
+  </div>
   <div class="cards" id="cards">
     <div class="empty"><div class="empty-icon">📡</div><p>Menunggu data…</p></div>
   </div>
@@ -123,6 +134,29 @@ main{padding:18px 20px}
 <script>
 const BASE = location.pathname.replace(/\/$/,'');
 let ws=null, reconn=null, switching=false;
+
+async function forceEntry(){
+  const btn=document.getElementById('testBtn');
+  if(!confirm('Insert test order: BUKA posisi BTC/USDT LONG?\n\n(dry-run, uang palsu — buat mastiin eksekusi jalan)')) return;
+  btn.disabled=true; btn.textContent='⏳ Membuka posisi…';
+  try{
+    const r=await fetch(`${BASE}/api/forceentry?pair=${encodeURIComponent('BTC/USDT:USDT')}&side=long`,{method:'POST'});
+    const j=await r.json();
+    if(j.ok){ btn.textContent='✅ Order masuk! Cek kartu di bawah'; }
+    else{ btn.textContent='❌ '+((j.detail&&j.detail.detail)||j.error||'gagal'); }
+  }catch(e){ btn.textContent='❌ error'; }
+  setTimeout(()=>{ btn.disabled=false; btn.textContent='🧪 Test Order (BTC Long)'; }, 5000);
+}
+
+async function closeTrade(id,btn){
+  if(!confirm(`Tutup posisi #${id}?`)) return;
+  btn.disabled=true; btn.textContent='⏳ Menutup…';
+  try{
+    const r=await fetch(`${BASE}/api/forceexit/${id}`,{method:'POST'});
+    const j=await r.json();
+    btn.textContent = j.ok ? '✅ Ditutup' : '❌ gagal';
+  }catch(e){ btn.textContent='❌ error'; btn.disabled=false; }
+}
 
 async function switchMode(){
   const btn=document.getElementById('modeBtn');
@@ -223,7 +257,9 @@ function render(d){
           <div class="kv"><span class="k">Now</span><span class="v">${fmt(t.current_rate)}</span></div>
           <div class="kv"><span class="k">Stake</span><span class="v">${fmt(t.stake)} ${dca}</span></div>
           <div class="kv"><span class="k">Tag</span><span class="v" style="font-size:10px">${esc(t.enter_tag||'—')}</span></div>
-        </div></div>`;
+        </div>
+        <div class="card-foot"><button class="close-btn" onclick="closeTrade('${t.trade_id}',this)">✕ Tutup Posisi</button></div>
+        </div>`;
     }).join('');
   }
 
