@@ -69,6 +69,10 @@ main{padding:18px 20px}
 .pnl-pct{font-family:var(--mono);font-size:22px;font-weight:700}
 .pnl-abs{font-family:var(--mono);font-size:12px;color:var(--muted)}
 .pos{color:var(--long)}.neg{color:var(--short)}
+.pnl-pct,.pnl-abs,.now-val,.stake-val{transition:color .2s}
+.now-val{border-radius:3px;padding:0 3px}
+.now-val.tick{animation:tick .6s ease}
+@keyframes tick{0%{background:rgba(77,143,255,.35)}100%{background:transparent}}
 .card-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px 14px 14px;font-size:12px}
 .kv{display:flex;flex-direction:column;gap:2px}
 .kv .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
@@ -133,7 +137,7 @@ main{padding:18px 20px}
 
 <script>
 const BASE = location.pathname.replace(/\/$/,'');
-let ws=null, reconn=null, switching=false;
+let ws=null, reconn=null, switching=false, lastLogSig='';
 
 async function forceEntry(){
   const btn=document.getElementById('testBtn');
@@ -199,6 +203,58 @@ function fmt(p){
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
+// ── position cards: patch in place, no full re-render (anti-flicker) ──
+function cardMarkup(t){
+  const isL=!t.is_short, cls=isL?'long':'short';
+  return `
+    <div class="card-head"><span class="card-sym">${esc(t.pair)}</span>
+      <span class="dir ${cls}">${isL?'▲ LONG':'▼ SHORT'} ${t.leverage>1?t.leverage+'x':''}</span></div>
+    <div class="card-pnl"><div class="pnl-pct"></div><div class="pnl-abs"></div></div>
+    <div class="card-grid">
+      <div class="kv"><span class="k">Entry</span><span class="v">${fmt(t.open_rate)}</span></div>
+      <div class="kv"><span class="k">Now</span><span class="v now-val"></span></div>
+      <div class="kv"><span class="k">Stake</span><span class="v stake-val"></span></div>
+      <div class="kv"><span class="k">Tag</span><span class="v" style="font-size:10px">${esc(t.enter_tag||'—')}</span></div>
+    </div>
+    <div class="card-foot"><button class="close-btn" onclick="closeTrade('${t.trade_id}',this)">✕ Tutup Posisi</button></div>`;
+}
+function patchCard(el,t){
+  const pnl=t.profit_pct||0, pc=pnl>=0?'pos':'neg';
+  const pctEl=el.querySelector('.pnl-pct');
+  const newPct=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';
+  if(pctEl.textContent!==newPct){ pctEl.textContent=newPct; pctEl.className='pnl-pct '+pc; }
+  el.querySelector('.pnl-abs').textContent=(t.profit_abs>=0?'+':'')+(t.profit_abs||0).toFixed(4)+' USDT';
+  const nowEl=el.querySelector('.now-val'), newNow=fmt(t.current_rate);
+  if(nowEl.textContent!==newNow){
+    nowEl.textContent=newNow;
+    nowEl.classList.remove('tick'); void nowEl.offsetWidth; nowEl.classList.add('tick');
+  }
+  const dca=(t.entries||1)>1?` (DCA ×${t.entries})`:'';
+  el.querySelector('.stake-val').textContent=fmt(t.stake)+dca;
+}
+function renderCards(trades,n){
+  const wrap=document.getElementById('cards');
+  if(!trades.length){
+    if(!wrap.querySelector('.empty'))
+      wrap.innerHTML=`<div class="empty"><div class="empty-icon">💤</div><p>Belum ada posisi terbuka</p><small>Bot aktif memantau ${n} pair. NFI sabar menunggu — log 🔍 di bawah membuktikan ia bekerja.</small></div>`;
+    return;
+  }
+  const emp=wrap.querySelector('.empty'); if(emp) emp.remove();
+  const seen=new Set();
+  trades.forEach(t=>{
+    const id='card-'+t.trade_id; seen.add(id);
+    let el=document.getElementById(id);
+    if(!el){
+      el=document.createElement('div');
+      el.id=id; el.className='card '+(!t.is_short?'long':'short');
+      el.innerHTML=cardMarkup(t);
+      wrap.appendChild(el);
+    }
+    patchCard(el,t);
+  });
+  Array.from(wrap.children).forEach(c=>{ if(c.id&&c.id.startsWith('card-')&&!seen.has(c.id)) c.remove(); });
+}
+
 function render(d){
   // freqtrade connection
   const st=document.getElementById('stateBadge');
@@ -238,33 +294,14 @@ function render(d){
   if(d.open_count>0){ sb.textContent=`${d.open_count} posisi terbuka · memantau ${n} pair`; }
   else{ sb.textContent=`🔍 Memantau ${n} pair — NFI menunggu setup dip (belum ada posisi, ini normal)`; }
 
-  // position cards
-  const cards=document.getElementById('cards');
-  if(!d.trades||!d.trades.length){
-    cards.innerHTML=`<div class="empty"><div class="empty-icon">💤</div><p>Belum ada posisi terbuka</p><small>Bot aktif memantau ${n} pair. NFI sabar menunggu — log 🔍 di bawah membuktikan ia bekerja.</small></div>`;
-  }else{
-    cards.innerHTML=d.trades.map(t=>{
-      const isL=!t.is_short, cls=isL?'long':'short';
-      const pnl=t.profit_pct||0, pc=pnl>=0?'pos':'neg';
-      const dca=(t.entries||1)>1?`<span class="dca-tag">DCA ×${t.entries}</span>`:'';
-      return `<div class="card ${cls}">
-        <div class="card-head"><span class="card-sym">${esc(t.pair)}</span>
-          <span class="dir ${cls}">${isL?'▲ LONG':'▼ SHORT'} ${t.leverage>1?t.leverage+'x':''}</span></div>
-        <div class="card-pnl"><div class="pnl-pct ${pc}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</div>
-          <div class="pnl-abs">${(t.profit_abs>=0?'+':'')}${(t.profit_abs||0).toFixed(4)} USDT</div></div>
-        <div class="card-grid">
-          <div class="kv"><span class="k">Entry</span><span class="v">${fmt(t.open_rate)}</span></div>
-          <div class="kv"><span class="k">Now</span><span class="v">${fmt(t.current_rate)}</span></div>
-          <div class="kv"><span class="k">Stake</span><span class="v">${fmt(t.stake)} ${dca}</span></div>
-          <div class="kv"><span class="k">Tag</span><span class="v" style="font-size:10px">${esc(t.enter_tag||'—')}</span></div>
-        </div>
-        <div class="card-foot"><button class="close-btn" onclick="closeTrade('${t.trade_id}',this)">✕ Tutup Posisi</button></div>
-        </div>`;
-    }).join('');
-  }
+  // position cards — patch in place (no flicker)
+  renderCards(d.trades||[], n);
 
-  // logs
+  // logs — rebuild only when changed (no flicker / scroll jump)
   if(d.logs){
+    const sig=d.logs.length+'|'+((d.logs[d.logs.length-1]||{}).time||'')+'|'+((d.logs[d.logs.length-1]||{}).msg||'').slice(0,40);
+    if(sig!==lastLogSig){
+    lastLogSig=sig;
     const feed=document.getElementById('logFeed');
     feed.innerHTML=d.logs.slice().reverse().map(r=>{
       const scan=(r.msg||'').includes('SCAN')||(r.msg||'').includes('🔍');
@@ -273,6 +310,7 @@ function render(d){
         <span class="log-lvl ${esc(r.level)}">${esc(r.level)}</span>
         <span class="log-msg">${esc(r.msg)}</span></div>`;
     }).join('');
+    }
   }
 }
 connect();
