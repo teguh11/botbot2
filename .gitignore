@@ -20,7 +20,10 @@ user_data/*.lock
 user_data/hyperopt.lock
 user_data/*-profit_max-*.json
 user_data/strategies/*.json
-tradesv3.sqlite*
+tradesv3*.sqlite*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # ── Old custom-bot leftovers ─────────────────────────────────
 master/
