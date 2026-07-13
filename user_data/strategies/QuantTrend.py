@@ -49,9 +49,18 @@ class QuantTrend(IStrategy):
     atr_period    = IntParameter(10, 30, default=14, space="buy")
     atr_stop_mult = DecimalParameter(2.0, 5.0, default=3.0, decimals=1, space="sell")
     target_vol    = DecimalParameter(0.20, 0.80, default=0.40, decimals=2, space="buy")
-    lev_used      = IntParameter(1, 5, default=2, space="buy")
+    lev_used      = IntParameter(1, 5, default=1, space="buy")
 
     _BARS_PER_YEAR = 6 * 365  # 4h → 6 bar/hari
+
+    # ── Protections (kurangi whipsaw & over-trading) ──────────
+    @property
+    def protections(self):
+        return [
+            {"method": "CooldownPeriod", "stop_duration_candles": 4},
+            {"method": "StoplossGuard", "lookback_period_candles": 24,
+             "trade_limit": 3, "stop_duration_candles": 12, "only_per_pair": True},
+        ]
 
     # ── Indicators ────────────────────────────────────────────
     def populate_indicators(self, df: DataFrame, metadata: dict) -> DataFrame:
@@ -61,27 +70,27 @@ class QuantTrend(IStrategy):
         df["adx"]      = ta.ADX(df, timeperiod=14)
         logret = np.log(df["close"] / df["close"].shift(1))
         df["realized_vol"] = logret.rolling(30).std() * np.sqrt(self._BARS_PER_YEAR)
-        return df
 
-    # ── Entry (time-series momentum + trend filter) ───────────
-    def populate_entry_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
         adx = int(self.adx_min.value)
-        long_cond = (
-            (df["close"] > df["ema_slow"]) & (df["mom"] > 0)
-            & (df["adx"] > adx) & (df["volume"] > 0)
-        )
-        short_cond = (
-            (df["close"] < df["ema_slow"]) & (df["mom"] < 0)
-            & (df["adx"] > adx) & (df["volume"] > 0)
-        )
-        df.loc[long_cond,  ["enter_long",  "enter_tag"]] = (1, "tsmom_long")
-        df.loc[short_cond, ["enter_short", "enter_tag"]] = (1, "tsmom_short")
+        df["trend_up"] = (df["close"] > df["ema_slow"]) & (df["mom"] > 0) & (df["adx"] > adx)
+        df["trend_dn"] = (df["close"] < df["ema_slow"]) & (df["mom"] < 0) & (df["adx"] > adx)
         return df
 
-    # ── Exit (trend/momentum flip) ────────────────────────────
+    # ── Entry: hanya saat tren BARU muncul (crossover), sekali ──
+    def populate_entry_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
+        prev_up = df["trend_up"].shift(1).fillna(False)
+        prev_dn = df["trend_dn"].shift(1).fillna(False)
+        new_up  = df["trend_up"] & (~prev_up) & (df["volume"] > 0)
+        new_dn  = df["trend_dn"] & (~prev_dn) & (df["volume"] > 0)
+        df.loc[new_up, ["enter_long",  "enter_tag"]] = (1, "tsmom_long")
+        df.loc[new_dn, ["enter_short", "enter_tag"]] = (1, "tsmom_short")
+        return df
+
+    # ── Exit: HANYA saat tren balik penuh ke arah lawan ───────
+    #    (exit utama tetap via ATR chandelier trailing stop)
     def populate_exit_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
-        df.loc[(df["close"] < df["ema_slow"]) | (df["mom"] < 0), "exit_long"]  = 1
-        df.loc[(df["close"] > df["ema_slow"]) | (df["mom"] > 0), "exit_short"] = 1
+        df.loc[df["trend_dn"], "exit_long"]  = 1
+        df.loc[df["trend_up"], "exit_short"] = 1
         return df
 
     # ── Volatility targeting (posisi ∝ target_vol / realized_vol) ──
