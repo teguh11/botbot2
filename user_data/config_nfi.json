@@ -61,9 +61,7 @@
       "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
       "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
       "LTC/USDT", "BCH/USDT", "NEAR/USDT", "APT/USDT", "ARB/USDT",
-      "OP/USDT", "INJ/USDT", "ATOM/USDT", "UNI/USDT", "FIL/USDT",
-      "ETC/USDT", "TRX/USDT", "AAVE/USDT", "RUNE/USDT", "SAND/USDT",
-      "ALGO/USDT", "FET/USDT", "STX/USDT", "GRT/USDT", "ICP/USDT"
+      "OP/USDT", "INJ/USDT", "ATOM/USDT", "UNI/USDT", "FIL/USDT"
     ],
     "pair_blacklist": [
       "BNB/.*", ".*(BULL|BEAR|UP|DOWN)/.*",

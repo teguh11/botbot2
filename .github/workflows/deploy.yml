@@ -1,8 +1,13 @@
-name: Deploy to Server
+name: Deploy Freqtrade to VPS
 
-# NOTE: Auto-deploy disabled — repo migrated to Freqtrade (native, Python 3.12).
-# Server must be provisioned first: Python 3.12 + TA-Lib + venv + freqtrade.
-# This workflow is a placeholder and runs only when triggered manually.
+# Idempotent provision + deploy. Safe to re-run.
+# Trigger manually from the Actions tab (workflow_dispatch).
+#
+# Required GitHub secrets:
+#   SERVER_HOST       - VPS IP / hostname
+#   SERVER_USER       - SSH user (e.g. ubuntu)
+#   SSH_PRIVATE_KEY   - private key authorized on the VPS
+#   FREQUI_PASSWORD   - password for the FreqUI dashboard login
 on:
   workflow_dispatch:
 
@@ -10,16 +15,96 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy Freqtrade via SSH
+      - name: Provision & deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          FREQUI_PASSWORD: ${{ secrets.FREQUI_PASSWORD }}
         with:
           host:     ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key:      ${{ secrets.SSH_PRIVATE_KEY }}
+          envs:     FREQUI_PASSWORD
+          command_timeout: 30m
           script: |
             set -e
-            cd /home/ubuntu/botbot2
-            git pull origin master
+            REPO=/home/ubuntu/botbot2
+
+            if [ -z "$FREQUI_PASSWORD" ]; then
+              echo "✗ GitHub secret FREQUI_PASSWORD is not set — aborting."
+              exit 1
+            fi
+
+            echo "── 1. System packages ────────────────────────────────"
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+              python3.12 python3.12-venv python3.12-dev \
+              build-essential wget git nginx
+
+            echo "── 2. TA-Lib C library (.deb) ─────────────────────────"
+            if ! ldconfig -p | grep -qiE "libta[-_]lib"; then
+              ARCH=$(dpkg --print-architecture)
+              cd /tmp
+              wget -q "https://github.com/TA-Lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_${ARCH}.deb"
+              sudo dpkg -i "ta-lib_0.6.4_${ARCH}.deb"
+              sudo ldconfig
+            fi
+
+            echo "── 3. Swap (2 GB buffer for 2 GB VPS) ─────────────────"
+            if ! sudo swapon --show | grep -q /swapfile; then
+              sudo fallocate -l 2G /swapfile
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+              sudo swapon /swapfile
+              grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+            fi
+
+            echo "── 4. Sync repo ───────────────────────────────────────"
+            cd $REPO
+            git fetch origin --quiet
+            git reset --hard origin/master
+
+            echo "── 5. Python venv + deps ──────────────────────────────"
+            if [ ! -x .venv/bin/python ]; then
+              python3.12 -m venv .venv
+            fi
+            .venv/bin/pip install --upgrade pip -q
             .venv/bin/pip install -r requirements.txt -q
+            .venv/bin/freqtrade install-ui
+
+            echo "── 6. Secrets (.env, created once, persisted) ─────────"
+            if [ ! -f .env ]; then
+              JWT=$(.venv/bin/python -c "import secrets;print(secrets.token_hex(32))")
+              WST=$(.venv/bin/python -c "import secrets;print(secrets.token_hex(24))")
+              cat > .env <<EOF
+            FREQTRADE__EXCHANGE__KEY=
+            FREQTRADE__EXCHANGE__SECRET=
+            FREQTRADE__API_SERVER__JWT_SECRET_KEY=$JWT
+            FREQTRADE__API_SERVER__WS_TOKEN=$WST
+            FREQTRADE__API_SERVER__PASSWORD=$FREQUI_PASSWORD
+            EOF
+              chmod 600 .env
+            else
+              # keep jwt/ws_token, refresh only the dashboard password
+              grep -v '^FREQTRADE__API_SERVER__PASSWORD=' .env > .env.tmp || true
+              echo "FREQTRADE__API_SERVER__PASSWORD=$FREQUI_PASSWORD" >> .env.tmp
+              mv .env.tmp .env
+              chmod 600 .env
+            fi
+
+            echo "── 7. systemd service ─────────────────────────────────"
+            sudo systemctl disable --now botbot2 2>/dev/null || true
+            sudo cp deploy/freqtrade.service /etc/systemd/system/freqtrade.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable freqtrade
             sudo systemctl restart freqtrade
-            sudo systemctl status freqtrade --no-pager -l
+
+            echo "── 8. nginx reverse proxy (FreqUI :8080) ──────────────"
+            sudo cp nginx.conf /etc/nginx/sites-available/botbot2
+            sudo ln -sf /etc/nginx/sites-available/botbot2 /etc/nginx/sites-enabled/botbot2
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo nginx -t && sudo systemctl reload nginx
+
+            echo "── 9. Status ──────────────────────────────────────────"
+            sleep 5
+            sudo systemctl status freqtrade --no-pager -l | head -15
+            echo "✓ Deployed $(date '+%Y-%m-%d %H:%M:%S')"
