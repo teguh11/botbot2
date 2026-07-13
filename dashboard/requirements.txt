@@ -1,0 +1,5 @@
+# Dashboard deps — already satisfied by the freqtrade venv
+# (freqtrade bundles fastapi, uvicorn, httpx). Listed for clarity.
+fastapi
+uvicorn[standard]
+httpx

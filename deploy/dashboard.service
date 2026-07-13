@@ -1,0 +1,23 @@
+[Unit]
+Description=botbot2 Custom Dashboard (Freqtrade REST client)
+After=network-online.target freqtrade.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/botbot2
+EnvironmentFile=/home/ubuntu/botbot2/.env
+Environment=FT_API_URL=http://127.0.0.1:8080
+Environment=FT_USERNAME=botbot2
+Environment=DASH_PORT=8100
+ExecStart=/home/ubuntu/botbot2/.venv/bin/python /home/ubuntu/botbot2/dashboard/app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

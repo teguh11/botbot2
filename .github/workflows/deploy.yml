@@ -15,6 +15,7 @@ on:
     paths:
       - 'user_data/config*.json'
       - 'user_data/strategies/**'
+      - 'dashboard/**'
       - 'deploy/**'
       - 'requirements.txt'
       - 'nginx.conf'
@@ -101,14 +102,16 @@ jobs:
               chmod 600 .env
             fi
 
-            echo "── 7. systemd service ─────────────────────────────────"
+            echo "── 7. systemd services (freqtrade + dashboard) ────────"
             sudo systemctl disable --now botbot2 2>/dev/null || true
             sudo cp deploy/freqtrade.service /etc/systemd/system/freqtrade.service
+            sudo cp deploy/dashboard.service /etc/systemd/system/dashboard.service
             sudo systemctl daemon-reload
-            sudo systemctl enable freqtrade
+            sudo systemctl enable freqtrade dashboard
             sudo systemctl restart freqtrade
+            sudo systemctl restart dashboard
 
-            echo "── 8. nginx reverse proxy (FreqUI :8080) ──────────────"
+            echo "── 8. nginx (/ → dashboard :8100, /frequi/ → FreqUI) ──"
             sudo cp nginx.conf /etc/nginx/sites-available/botbot2
             sudo ln -sf /etc/nginx/sites-available/botbot2 /etc/nginx/sites-enabled/botbot2
             sudo rm -f /etc/nginx/sites-enabled/default
@@ -116,5 +119,6 @@ jobs:
 
             echo "── 9. Status ──────────────────────────────────────────"
             sleep 5
-            sudo systemctl status freqtrade --no-pager -l | head -15
+            sudo systemctl status freqtrade --no-pager -l | head -10
+            sudo systemctl status dashboard --no-pager -l | head -10
             echo "✓ Deployed $(date '+%Y-%m-%d %H:%M:%S')"

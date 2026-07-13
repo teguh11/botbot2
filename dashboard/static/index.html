@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>botbot2 — Freqtrade Dashboard</title>
+<style>
+:root{
+  --bg:#060c17; --bg2:#0b1524; --bg3:#101e30; --bg4:#152640;
+  --border:#1b2f4a; --border2:#243d5e; --text:#e2eaf5; --muted:#6b829e;
+  --long:#00e87a; --short:#ff4560; --accent:#4d8fff; --accent2:#7c5cfc;
+  --gold:#f5c842; --radius:12px;
+  --mono:'SF Mono','Fira Code','JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;min-height:100vh}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+.header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:56px;background:rgba(6,12,23,.92);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.brand-name{font-size:16px;font-weight:700;letter-spacing:.5px}
+.brand-sub{font-size:11px;color:var(--muted)}
+.header-right{display:flex;align-items:center;gap:10px}
+.badge{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);font-size:11px;font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.badge.on .dot{background:var(--long);box-shadow:0 0 6px var(--long)}
+.badge.off .dot{background:var(--short);box-shadow:0 0 6px var(--short)}
+.badge.mode{color:var(--gold);border-color:rgba(245,200,66,.3)}
+
+.stats{display:flex;flex-wrap:wrap;gap:0;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;overflow-x:auto}
+.stat{display:flex;flex-direction:column;padding:12px 22px;border-right:1px solid var(--border);flex-shrink:0}
+.stat:last-child{border-right:none}
+.stat-val{font-size:20px;font-weight:700;font-family:var(--mono);line-height:1.2}
+.stat-val.long{color:var(--long)}.stat-val.short{color:var(--short)}.stat-val.accent{color:var(--accent)}
+.stat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-top:3px}
+
+.scan-banner{display:flex;align-items:center;gap:12px;padding:12px 20px;background:rgba(77,143,255,.07);border-bottom:1px solid rgba(77,143,255,.18);font-size:13px;color:var(--accent)}
+.scan-ring{width:16px;height:16px;border-radius:50%;border:2px solid rgba(77,143,255,.25);border-top-color:var(--accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+main{padding:18px 20px}
+.section-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:6px 0 12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;animation:fade .3s ease both}
+@keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.card.long{border-left:3px solid var(--long)}
+.card.short{border-left:3px solid var(--short)}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px}
+.card-sym{font-size:15px;font-weight:700}
+.dir{padding:3px 9px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px}
+.dir.long{background:rgba(0,232,122,.12);color:var(--long)}
+.dir.short{background:rgba(255,69,96,.12);color:var(--short)}
+.card-pnl{text-align:right;padding:0 14px 6px}
+.pnl-pct{font-family:var(--mono);font-size:22px;font-weight:700}
+.pnl-abs{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.pos{color:var(--long)}.neg{color:var(--short)}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px 14px 14px;font-size:12px}
+.kv{display:flex;flex-direction:column;gap:2px}
+.kv .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.kv .v{font-family:var(--mono);font-weight:600}
+.dca-tag{display:inline-block;padding:1px 6px;border-radius:4px;background:var(--bg4);color:var(--gold);font-size:10px;font-weight:700}
+
+.empty{padding:60px 20px;text-align:center;color:var(--muted)}
+.empty-icon{font-size:44px;opacity:.4;margin-bottom:12px}
+.empty p{font-size:14px}.empty small{font-size:12px;opacity:.7;display:block;margin-top:6px}
+
+.log-panel{margin:20px 0 24px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.log-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg3);border-bottom:1px solid var(--border);font-size:12px;font-weight:700}
+.log-feed{max-height:260px;overflow-y:auto;background:var(--bg);font-family:var(--mono);font-size:11px}
+.log-row{display:flex;gap:10px;padding:5px 14px;border-bottom:1px solid rgba(255,255,255,.03)}
+.log-row.scan{background:rgba(77,143,255,.05)}
+.log-ts{color:var(--muted);flex-shrink:0}
+.log-lvl{flex-shrink:0;font-weight:700;width:44px}
+.log-lvl.INFO{color:var(--accent)}.log-lvl.WARNING{color:var(--gold)}.log-lvl.ERROR{color:var(--short)}
+.log-msg{color:var(--text);word-break:break-word}
+
+@media(max-width:600px){.cards{grid-template-columns:1fr}.stat{padding:10px 14px}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="brand">
+    <div class="brand-icon">⚡</div>
+    <div><div class="brand-name">botbot2</div><div class="brand-sub">Freqtrade · NFI Futures</div></div>
+  </div>
+  <div class="header-right">
+    <span class="badge mode" id="modeBadge" style="display:none"></span>
+    <span class="badge" id="stateBadge"><span class="dot"></span><span id="stateTxt">…</span></span>
+    <span class="badge" id="wsBadge"><span class="dot"></span><span id="wsTxt">Connecting…</span></span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat"><span class="stat-val accent" id="sBalance">—</span><span class="stat-lbl">Balance USDT</span></div>
+  <div class="stat"><span class="stat-val" id="sPnl">—</span><span class="stat-lbl">Total PnL</span></div>
+  <div class="stat"><span class="stat-val accent" id="sOpen">—</span><span class="stat-lbl">Posisi Terbuka</span></div>
+  <div class="stat"><span class="stat-val" id="sClosed">—</span><span class="stat-lbl">Trade Selesai</span></div>
+  <div class="stat"><span class="stat-val" id="sWin">—</span><span class="stat-lbl">Win Rate</span></div>
+</div>
+
+<div class="scan-banner" id="scanBanner"><div class="scan-ring"></div><span id="scanTxt">Menghubungkan ke freqtrade…</span></div>
+
+<main>
+  <div class="section-title">Posisi Terbuka</div>
+  <div class="cards" id="cards">
+    <div class="empty"><div class="empty-icon">📡</div><p>Menunggu data…</p></div>
+  </div>
+
+  <div class="log-panel">
+    <div class="log-head"><span>📋 Log Aktivitas Bot</span><span id="logHint" style="color:var(--muted);font-weight:400">baris 🔍 = bot sedang scanning</span></div>
+    <div class="log-feed" id="logFeed"></div>
+  </div>
+</main>
+
+<script>
+const BASE = location.pathname.replace(/\/$/,'');
+let ws=null, reconn=null;
+
+function connect(){
+  const host = ['0.0.0.0',''].includes(location.hostname) ? 'localhost:'+location.port : location.host;
+  ws = new WebSocket(`ws://${host}${BASE}/ws`);
+  ws.onopen = ()=>{ setWs(true); clearTimeout(reconn); };
+  ws.onclose = ()=>{ setWs(false); reconn=setTimeout(connect,3000); };
+  ws.onmessage = e=>render(JSON.parse(e.data));
+}
+function setWs(on){
+  const b=document.getElementById('wsBadge');
+  b.className='badge '+(on?'on':'off');
+  document.getElementById('wsTxt').textContent = on?'Live':'Terputus';
+}
+
+function fmt(p){
+  if(p==null) return '—';
+  if(p>=1000) return p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(p>=1) return p.toLocaleString('en-US',{minimumFractionDigits:4,maximumFractionDigits:4});
+  return p.toLocaleString('en-US',{minimumFractionDigits:6,maximumFractionDigits:6});
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+function render(d){
+  // freqtrade connection
+  const st=document.getElementById('stateBadge');
+  if(!d.connected){
+    st.className='badge off'; document.getElementById('stateTxt').textContent='FT Terputus';
+    document.getElementById('scanTxt').textContent='Tidak terhubung ke freqtrade — cek service.';
+    return;
+  }
+  st.className='badge '+(d.state==='running'?'on':'off');
+  document.getElementById('stateTxt').textContent = d.state==='running'?'Running':(d.state||'—');
+
+  const mb=document.getElementById('modeBadge');
+  mb.style.display=''; mb.textContent=(d.trading_mode||'').toUpperCase()+(d.dry_run?' · DRY-RUN':' · LIVE');
+
+  // stats
+  document.getElementById('sBalance').textContent = fmt(d.balance);
+  const pnl=d.profit?.total_pct||0, pnlEl=document.getElementById('sPnl');
+  pnlEl.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';
+  pnlEl.className='stat-val '+(pnl>0?'long':pnl<0?'short':'');
+  document.getElementById('sOpen').textContent=`${d.open_count}/${d.max_open}`;
+  document.getElementById('sClosed').textContent=d.profit?.closed??0;
+  const w=d.profit?.wins||0, l=d.profit?.losses||0, tot=w+l;
+  document.getElementById('sWin').textContent = tot? Math.round(w/tot*100)+'%' : '—';
+
+  // scan banner
+  const n=(d.whitelist||[]).length;
+  const sb=document.getElementById('scanTxt');
+  if(d.open_count>0){ sb.textContent=`${d.open_count} posisi terbuka · memantau ${n} pair`; }
+  else{ sb.textContent=`🔍 Memantau ${n} pair — NFI menunggu setup dip (belum ada posisi, ini normal)`; }
+
+  // position cards
+  const cards=document.getElementById('cards');
+  if(!d.trades||!d.trades.length){
+    cards.innerHTML=`<div class="empty"><div class="empty-icon">💤</div><p>Belum ada posisi terbuka</p><small>Bot aktif memantau ${n} pair. NFI sabar menunggu — log 🔍 di bawah membuktikan ia bekerja.</small></div>`;
+  }else{
+    cards.innerHTML=d.trades.map(t=>{
+      const isL=!t.is_short, cls=isL?'long':'short';
+      const pnl=t.profit_pct||0, pc=pnl>=0?'pos':'neg';
+      const dca=(t.entries||1)>1?`<span class="dca-tag">DCA ×${t.entries}</span>`:'';
+      return `<div class="card ${cls}">
+        <div class="card-head"><span class="card-sym">${esc(t.pair)}</span>
+          <span class="dir ${cls}">${isL?'▲ LONG':'▼ SHORT'} ${t.leverage>1?t.leverage+'x':''}</span></div>
+        <div class="card-pnl"><div class="pnl-pct ${pc}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</div>
+          <div class="pnl-abs">${(t.profit_abs>=0?'+':'')}${(t.profit_abs||0).toFixed(4)} USDT</div></div>
+        <div class="card-grid">
+          <div class="kv"><span class="k">Entry</span><span class="v">${fmt(t.open_rate)}</span></div>
+          <div class="kv"><span class="k">Now</span><span class="v">${fmt(t.current_rate)}</span></div>
+          <div class="kv"><span class="k">Stake</span><span class="v">${fmt(t.stake)} ${dca}</span></div>
+          <div class="kv"><span class="k">Tag</span><span class="v" style="font-size:10px">${esc(t.enter_tag||'—')}</span></div>
+        </div></div>`;
+    }).join('');
+  }
+
+  // logs
+  if(d.logs){
+    const feed=document.getElementById('logFeed');
+    feed.innerHTML=d.logs.slice().reverse().map(r=>{
+      const scan=(r.msg||'').includes('SCAN')||(r.msg||'').includes('🔍');
+      return `<div class="log-row ${scan?'scan':''}">
+        <span class="log-ts">${esc((r.time||'').slice(11,19))}</span>
+        <span class="log-lvl ${esc(r.level)}">${esc(r.level)}</span>
+        <span class="log-msg">${esc(r.msg)}</span></div>`;
+    }).join('');
+  }
+}
+connect();
+</script>
+</body>
+</html>
