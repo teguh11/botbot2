@@ -39,8 +39,8 @@ _last_snapshot: dict = {"connected": False}
 # Mode switching (nfi = sabar/proven, active = agresif)
 MODE_FILE = Path(__file__).parent.parent / "user_data" / "active_mode"
 MODES = {
-    "nfi":    {"label": "NFI (Sabar)",   "strategy": "NFIX7Verbose"},
-    "active": {"label": "Active (Agresif)", "strategy": "SupertrendSD"},
+    "nfi":    {"label": "NFI (Mean-Reversion)", "strategy": "NFIX7Verbose"},
+    "active": {"label": "Quant (Trend/Vol-Target)", "strategy": "QuantTrend"},
 }
 
 

@@ -166,7 +166,7 @@ async function switchMode(){
   const btn=document.getElementById('modeBtn');
   const cur=btn.dataset.cur||'nfi';
   const next=cur==='nfi'?'active':'nfi';
-  const nextLbl=next==='active'?'Active (Agresif — sering entry, less proven)':'NFI (Sabar — proven)';
+  const nextLbl=next==='active'?'Quant (Trend Following / Vol-Target — BELUM di-backtest, eksperimental)':'NFI (Mean-Reversion — proven)';
   if(!confirm(`Ganti ke mode ${nextLbl}?\n\nBot akan RESTART (~1-3 menit bot offline saat ganti).`)) return;
   switching=true;
   btn.disabled=true; btn.textContent='⏳ Mengganti mode & restart bot…';
@@ -273,8 +273,8 @@ function render(d){
   const btn=document.getElementById('modeBtn');
   if(d.mode && !switching){
     btn.style.display='';
-    if(d.mode==='nfi'){ btn.textContent='Mode: NFI (Sabar) → ganti ke Active'; btn.className='mode-btn to-active'; }
-    else{ btn.textContent='Mode: Active (Agresif) → balik ke NFI'; btn.className='mode-btn to-nfi'; }
+    if(d.mode==='nfi'){ btn.textContent='Mode: NFI (Mean-Reversion) → ganti ke Quant'; btn.className='mode-btn to-active'; }
+    else{ btn.textContent='Mode: Quant (Trend Following) → balik ke NFI'; btn.className='mode-btn to-nfi'; }
     btn.dataset.cur=d.mode;
   }
 
