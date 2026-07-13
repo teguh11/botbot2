@@ -1,0 +1,89 @@
+{
+  "$schema": "https://schema.freqtrade.io/schema.json",
+  "bot_name": "botbot2-nfi",
+  "dry_run": true,
+  "dry_run_wallet": 10000,
+  "grinding_enable": true,
+  "max_open_trades": 6,
+  "stake_currency": "USDT",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.99,
+  "fiat_display_currency": "USD",
+  "available_capital": 10000,
+  "position_adjustment_enable": true,
+  "force_entry_enable": true,
+  "initial_state": "running",
+  "timeframe": "5m",
+  "trading_mode": "spot",
+
+  "unfilledtimeout": {
+    "entry": 3,
+    "exit": 2,
+    "exit_timeout_count": 0,
+    "unit": "minutes"
+  },
+
+  "order_types": {
+    "entry": "limit",
+    "exit": "limit",
+    "emergency_exit": "limit",
+    "force_entry": "limit",
+    "force_exit": "limit",
+    "stoploss": "limit",
+    "stoploss_on_exchange": false,
+    "stoploss_on_exchange_interval": 60,
+    "stoploss_on_exchange_limit_ratio": 0.99
+  },
+
+  "entry_pricing": {
+    "price_side": "other",
+    "use_order_book": false,
+    "order_book_top": 1,
+    "price_last_balance": 0,
+    "check_depth_of_market": { "enabled": false, "bids_to_ask_delta": 1 }
+  },
+
+  "exit_pricing": {
+    "price_side": "other",
+    "use_order_book": false,
+    "order_book_top": 1,
+    "price_last_balance": 0
+  },
+
+  "exchange": {
+    "name": "binance",
+    "key": "",
+    "secret": "",
+    "ccxt_config": { "enableRateLimit": true },
+    "ccxt_async_config": { "enableRateLimit": true },
+    "pair_whitelist": [
+      "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+      "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
+      "LTC/USDT", "BCH/USDT", "NEAR/USDT", "APT/USDT", "ARB/USDT",
+      "OP/USDT", "INJ/USDT", "ATOM/USDT", "UNI/USDT", "FIL/USDT",
+      "ETC/USDT", "TRX/USDT", "AAVE/USDT", "RUNE/USDT", "SAND/USDT",
+      "ALGO/USDT", "FET/USDT", "STX/USDT", "GRT/USDT", "ICP/USDT"
+    ],
+    "pair_blacklist": [
+      "BNB/.*", ".*(BULL|BEAR|UP|DOWN)/.*",
+      ".*(USDC|BUSD|TUSD|FDUSD|DAI)/.*"
+    ]
+  },
+
+  "pairlists": [ { "method": "StaticPairList" } ],
+
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": true,
+    "jwt_secret_key": "PLACEHOLDER_override_via_env",
+    "ws_token": "PLACEHOLDER_override_via_env",
+    "CORS_origins": [],
+    "username": "botbot2",
+    "password": "PLACEHOLDER_override_via_env"
+  },
+
+  "internals": { "process_throttle_secs": 5 }
+}

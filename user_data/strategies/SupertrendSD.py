@@ -90,6 +90,7 @@ class SupertrendSD(IStrategy):
     st_period    = IntParameter(7, 20, default=10, space="buy")
     st_mult      = DecimalParameter(1.5, 4.0, default=3.0, decimals=1, space="buy")
     vol_factor   = DecimalParameter(1.0, 2.5, default=1.3, decimals=1, space="buy")
+    adx_min      = IntParameter(15, 40, default=25, space="buy")
     leverage_num = IntParameter(1, 10, default=5, space="buy")
 
     # ── Higher timeframe: SuperTrend 4H (filter arah) ─────────
@@ -119,23 +120,26 @@ class SupertrendSD(IStrategy):
         # Filter tren dasar
         dataframe["ema200"] = ta.EMA(dataframe, timeperiod=200)
         dataframe["rsi"]    = ta.RSI(dataframe, timeperiod=14)
+        dataframe["adx"]    = ta.ADX(dataframe, timeperiod=14)  # kekuatan tren
         return dataframe
 
     # ── Entry ─────────────────────────────────────────────────
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         long_cond = (
-            dataframe["st_flip_up"]                 # 15m flip bullish
-            & (dataframe["st_dir_4h"] == 1)         # 4H tren bullish
-            & dataframe["vol_spike"]                # volume konfirmasi
+            dataframe["st_flip_up"]                        # 15m flip bullish
+            & (dataframe["st_dir_4h"] == 1)                # 4H tren bullish
+            & dataframe["vol_spike"]                       # volume konfirmasi
+            & (dataframe["adx"] > self.adx_min.value)      # tren cukup kuat (anti-chop)
             & (dataframe["rsi"] < 70)
             & (dataframe["volume"] > 0)
         )
         dataframe.loc[long_cond, ["enter_long", "enter_tag"]] = (1, "st_flip_long")
 
         short_cond = (
-            dataframe["st_flip_down"]               # 15m flip bearish
-            & (dataframe["st_dir_4h"] == -1)        # 4H tren bearish
-            & dataframe["vol_spike"]                # volume konfirmasi
+            dataframe["st_flip_down"]                      # 15m flip bearish
+            & (dataframe["st_dir_4h"] == -1)               # 4H tren bearish
+            & dataframe["vol_spike"]                       # volume konfirmasi
+            & (dataframe["adx"] > self.adx_min.value)      # tren cukup kuat (anti-chop)
             & (dataframe["rsi"] > 30)
             & (dataframe["volume"] > 0)
         )
