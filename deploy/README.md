@@ -40,6 +40,33 @@ user: botbot2   password: <FREQUI_PASSWORD>
 > Pastikan port 80 terbuka di Security Group VPS.
 > Bot mulai dry-run; NFI download warmup candle dulu (beberapa menit) sebelum aktif.
 
+## Cek bot benar-benar jalan (scanning/trading)
+
+Strategy `NFIX7Verbose` nge-log status tiap ~60 dtk:
+`🔍 SCAN aktif | 20 pair dipantau | 0 posisi terbuka: belum ada — NFI nunggu dip`
+
+Lihat log itu di:
+- **FreqUI → tab Logs** (live)
+- server: `sudo journalctl -u freqtrade -f | grep SCAN`
+
+> Belum ada open trade itu **normal** — NFI sabar nunggu setup dip.
+> Log SCAN yang jalan = bukti bot hidup & memantau.
+
+**Tes eksekusi manual** (yakinin order beneran masuk): FreqUI → tombol
+**Force enter** → pilih pair → bot buka posisi → kelola otomatis.
+
+### Telegram (paling meyakinkan — notif real-time)
+
+1. Chat `@BotFather` → `/newbot` → simpan **token**
+2. Chat `@userinfobot` → catat **chat_id**
+3. Tambah ke `.env` server lalu `sudo systemctl restart freqtrade`:
+   ```
+   FREQTRADE__TELEGRAM__ENABLED=true
+   FREQTRADE__TELEGRAM__TOKEN=<token>
+   FREQTRADE__TELEGRAM__CHAT_ID=<chat_id>
+   ```
+Notif otomatis tiap entry/exit + command `/status`, `/profit`, `/count`, `/daily`.
+
 ## 4. Operasi di server
 
 ```bash

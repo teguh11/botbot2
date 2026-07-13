@@ -80,6 +80,20 @@
 
   "pairlists": [ { "method": "StaticPairList" } ],
 
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "chat_id": "",
+    "notification_settings": {
+      "status": "on",
+      "entry": "on",
+      "entry_fill": "on",
+      "exit": "on",
+      "exit_fill": "on",
+      "protection_trigger": "on"
+    }
+  },
+
   "api_server": {
     "enabled": true,
     "listen_ip_address": "127.0.0.1",
