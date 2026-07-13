@@ -72,7 +72,7 @@ jobs:
             .venv/bin/freqtrade install-ui
 
             echo "── 6. Secrets (.env, created once, persisted) ─────────"
-            if [ ! -f .env ]; then
+            if ! grep -q '^FREQTRADE__API_SERVER__JWT_SECRET_KEY=' .env 2>/dev/null; then
               JWT=$(.venv/bin/python -c "import secrets;print(secrets.token_hex(32))")
               WST=$(.venv/bin/python -c "import secrets;print(secrets.token_hex(24))")
               cat > .env <<EOF
