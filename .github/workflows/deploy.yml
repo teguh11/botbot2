@@ -1,7 +1,8 @@
 name: Deploy Freqtrade to VPS
 
 # Idempotent provision + deploy. Safe to re-run.
-# Trigger manually from the Actions tab (workflow_dispatch).
+# Auto-runs on push to master (only when deploy-relevant files change),
+# and can also be triggered manually from the Actions tab.
 #
 # Required GitHub secrets:
 #   SERVER_HOST       - VPS IP / hostname
@@ -9,6 +10,15 @@ name: Deploy Freqtrade to VPS
 #   SSH_PRIVATE_KEY   - private key authorized on the VPS
 #   FREQUI_PASSWORD   - password for the FreqUI dashboard login
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'user_data/config*.json'
+      - 'user_data/strategies/**'
+      - 'deploy/**'
+      - 'requirements.txt'
+      - 'nginx.conf'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 jobs:
